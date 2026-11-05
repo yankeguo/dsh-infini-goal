@@ -15,14 +15,91 @@
 `pnpm publish -r` 会按依赖拓扑自动排序，**bundle 最后发布**；bundle 的
 `workspace:*` 依赖在打包时会被改写为当前精确版本（`0.1.0` 等）。
 
+## 两种发布方式
+
+| 方式 | 认证 | 适用 |
+| --- | --- | --- |
+| **CI + npm Trusted Publishing（OIDC，推荐）** | GitHub Actions 的短时 OIDC token，**无需任何 npm secret** | 推 `v*` tag 自动发布 + 创建 GitHub Release |
+| 本地手动 | `npm login` 的长期会话凭据 | 首次发布新包、紧急补发、调试 |
+
+CI 方式在仓库里已经配置好（[`.github/workflows/publish.yml`](../.github/workflows/publish.yml)）：
+推 tag → install / typecheck / test / build / `pnpm publish -r` → GitHub Release。
+工作流里 **没有 `NODE_AUTH_TOKEN`、也没有 `NPM_TOKEN`**，只依赖 `id-token: write` 权限。
+
 ## 前置条件
 
 - Node.js ≥ 24.9、pnpm 12（`corepack enable` 或直接安装 pnpm 12.x）。
 - npm 账号对 `@yankeguo` scope 有写权限；所有包都声明了 `publishConfig.access: public`。
-- 本地发布需要 `npm login`（启用 2FA 时建议改用 CI + Automation Token）。
-- CI 发布需要在本仓库配置 secret `NPM_TOKEN`（见 [`.github/workflows/publish.yml`](../.github/workflows/publish.yml)）。
+- npm 账号已开启 **2FA**（`npm trust` 命令要求；CI 的 OIDC 发布本身不需要 2FA）。
+- GitHub Actions 运行在 **GitHub-hosted runner**（npm 目前不支持 self-hosted runner 的 trusted publishing）。
+- 仓库是公开仓库（本仓库已是 public）：trusted publishing 可在私有仓库使用，但
+  **provenance 需要公开仓库**；公开仓库下 pnpm 会自动附带 provenance。
 
-## 发版流程（手动）
+## 一次性配置：npm 信任发布者（Keyless OIDC）
+
+npm 只接受来自"被信任的 CI 工作流"的 OIDC 发布请求。每个包都要配置一次，
+把 **本仓库 + `publish.yml` 工作流** 声明为该包的 trusted publisher。
+
+### 前提
+
+1. **包必须已经存在于 npm registry**（npm 的硬性要求）：新包第一次发布只能走
+   `npm login` 手动发布或 `NPM_TOKEN`，之后才能配置 trusted publisher。
+2. `npm trust` 命令要求 **npm ≥ 11.15.0**、账号开启 2FA，且登录凭据不能是
+   "bypass 2FA" 类型的 Granular Token。
+
+### 方式 A：脚本批量配置（推荐）
+
+```sh
+npm login                                # 确认是 @yankeguo 维护者
+npx npm@latest --version                 # 确保 >= 11.15.0
+scripts/trusted-publishers.sh --dry-run  # 先看会做什么
+scripts/trusted-publishers.sh            # 逐个配置 7 个包
+scripts/trusted-publishers.sh --list     # 校验结果
+```
+
+脚本等价于对每个包执行：
+
+```sh
+npm trust github @yankeguo/dsh-infini-goal \
+  --file publish.yml \
+  --repo yankeguo/dsh-infini-goal \
+  --allow-publish \
+  --yes
+```
+
+- `--file` 必须只是工作流文件名（`publish.yml`），不能带路径，且文件必须位于
+  `.github/workflows/` 下；
+- `--allow-publish` 允许直接 `pnpm publish`（自 2026-09-03 起新建配置默认只允许
+  staged publish，必须显式授权直接发布；我们使用直接发布）；
+- 若使用 GitHub Environments 做发布审批，加 `--env <环境名>`，并同时在工作流 job 上写
+  `environment: <环境名>`，两边必须一致；
+- 每个包最多 10 个 trusted publisher；同一包已有一个配置时需先
+  `npm trust list <package>` 找到 id，再 `npm trust revoke <package> --id=<id>`，然后重建；
+- npm 建议批量配置时每次调用间隔约 2 秒（脚本已处理）。
+
+### 方式 B：npmjs.com 网页配置
+
+包的 npmjs.com 页面 → **Settings → Trusted Publisher → GitHub Actions**，填写：
+
+| 字段 | 值 |
+| --- | --- |
+| Organization or user | `yankeguo` |
+| Repository | `dsh-infini-goal` |
+| Workflow filename | `publish.yml` |
+| Environment name | 留空（或与工作流 `environment` 一致） |
+| Allowed actions | 勾选 **npm publish**（按需再加 npm dist-tag） |
+
+7 个包都要各配一次。
+
+### 校验
+
+```sh
+scripts/trusted-publishers.sh --list
+# 或
+npm trust list @yankeguo/dsh-infini-goal
+```
+
+## 发版流程
 
 ### 1. 准备干净的 main
 
@@ -40,7 +117,6 @@ git status                 # 必须干净
 export VERSION=0.2.0
 node -e '
   const fs = require("node:fs")
-  const { execSync } = require("node:child_process")
   const dirs = ["protocol","infini-goal","driver","tool","command","client-ui","bundle"]
   for (const dir of dirs) {
     const file = `packages/${dir}/package.json`
@@ -49,7 +125,7 @@ node -e '
     fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + "\n")
   }
   console.log("bumped to", process.env.VERSION)
-' 
+'
 pnpm install                # 同步 workspace 锁文件中的版本
 ```
 
@@ -65,7 +141,7 @@ CI 会用它作为 GitHub Release 正文。
 
 ```sh
 pnpm install --frozen-lockfile     # 锁文件一致
-pnpm typecheck                     # TS 检查（本项目无独立构建类型，仅做源码检查）
+pnpm typecheck                     # TS 检查
 pnpm test                          # 单元测试（vitest）
 pnpm build                         # 生成 packages/*/lib（lib 被 gitignore，发布时必须现构建）
 pnpm release:dry                   # 递归 dry-run：打印 7 个包的发布计划，不上传
@@ -80,16 +156,9 @@ tar -tzf /tmp/infini-pkgs/*.tgz        # 必须包含 package/cordis.patch.yml�
 tar -xzOf /tmp/infini-pkgs/*.tgz package/package.json   # workspace:* 应已改写为精确版本
 ```
 
-### 5. 发布（二选一）
+### 5. 发布
 
-**A. 本地发布**
-
-```sh
-npm login                              # 确保是 @yankeguo 的维护者
-pnpm release:publish                   # = pnpm build && pnpm publish -r --access public --no-git-checks --tag latest
-```
-
-**B. 推 tag 触发 GitHub Actions（推荐，可复现 + 自动建 Release）**
+**A. 推 tag 触发 CI（推荐，keyless OIDC）**
 
 ```sh
 git add -A
@@ -99,8 +168,27 @@ git tag -a v0.2.0 -m "v0.2.0"
 git push origin v0.2.0                 # 触发 .github/workflows/publish.yml
 ```
 
-流水线会依次执行 install / typecheck / test / build / `pnpm publish -r` / 创建 GitHub Release。
-`workflow_dispatch` 也支持手动触发（但不带 tag 时不会创建 Release）。
+工作流需要以下权限（已在 workflow 中声明）：
+
+```yaml
+permissions:
+  contents: write     # 创建 GitHub Release
+  id-token: write     # OIDC：pnpm 换取 npm 短时 token
+```
+
+pnpm 检测到 GitHub Actions 的 OIDC 环境后会自动完成 token 交换；公开仓库 + 公开包
+会**自动附带 provenance**（无需 `--provenance` 参数）。`workflow_dispatch` 也支持手动触发，
+但不带 tag 时不会创建 Release。
+
+**B. 本地手动发布（首次发布新包 / 紧急补发）**
+
+```sh
+npm login                              # 确保是 @yankeguo 的维护者
+pnpm release:publish                   # = pnpm build && pnpm publish -r --access public --no-git-checks --tag latest
+```
+
+本地发布仍使用传统凭据（`npm login` 或 `NODE_AUTH_TOKEN`），与 OIDC 并行可用；
+OIDC 只是在 CI 中**取代**长期 token。
 
 ### 6. 验证发布结果
 
@@ -118,6 +206,24 @@ dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle@0.2.0
 
 然后刷新 Web 页面，执行 `/infini-goal <objective>` 冒烟。
 
+## Keyless OIDC 工作原理（研究笔记）
+
+1. 工作流声明 `permissions: id-token: write` 后，GitHub Actions 通过
+   `ACTIONS_ID_TOKEN_REQUEST_URL` / `ACTIONS_ID_TOKEN_REQUEST_TOKEN`
+   暴露一个 OIDC ID token 获取端点（每个 job、每次运行都是新的短时 token）。
+2. `pnpm publish` 检测到该环境后，用自己的 identity 请求一个受众为
+   `npm:registry.npmjs.org` 的 ID token，向 registry 的
+   `/-/npm/v1/oidc/token/exchange/package/<pkg>` 换取**一次性的发布 token**；
+   也可通过 `NPM_ID_TOKEN` 传给 pnpm（pnpm 会校验其 `aud` 是否匹配目标 registry）。
+3. npm 侧校验 OIDC claims（仓库、工作流文件名、可选 environment）与包的
+   trusted publisher 配置一致，然后接受发布。
+4. 因为 token 是短时的、且绑定到具体工作流，长期 `NPM_TOKEN` 不再需要，泄露风险消失。
+5. provenance 由 pnpm 在 trusted publishing 下自动生成（Sigstore，要求公开仓库）；
+   可用 `--no-provenance` 关闭（例如 self-hosted runner）。
+
+> pnpm 版本要求：本仓库 CI 固定 `pnpm@12.16.1`；OIDC 发布支持更早的 pnpm 12 版本，
+> 但建议保持 12.12+（该版本起 `pnpm dist-tag` 也支持 OIDC，可用于在 CI 里管理 dist-tag）。
+
 ## 版本与 dist-tag 策略
 
 - 稳定版：默认 `latest`（`pnpm release:publish` / CI 已带 `--tag latest`）。
@@ -130,13 +236,16 @@ dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle@0.2.0
 
 | 现象 | 原因 / 处理 |
 | --- | --- |
-| `npm error code ENEEDAUTH` | 未登录：`npm login`；CI 检查 `NPM_TOKEN` secret 是否存在且未过期 |
-| `403 Forbidden — You do not have permission to publish` | 账号对 `@yankeguo` scope 无权限，或包名已被占用 |
+| CI 报 `ERR_PNPM_ID_TOKEN_GITHUB_WORKFLOW_INCORRECT_PERMISSIONS` | 工作流缺少 `permissions: id-token: write`（或 job 级权限覆盖了它） |
+| CI 报 401/403 / `no trust evidence` / `package not found` | trusted publisher 配置与本次运行不匹配：核对 repo、**工作流文件名**、environment 三项；或该包尚未配置/尚未首次发布 |
+| `npm trust` 报 401/ENEEDAUTH | 未 `npm login`；OIDC 只用于 CI 发布，配置 trust 仍需要登录凭据 |
+| `npm trust` 报 2FA / 权限错误 | 账号未开启 2FA，或使用了 "bypass 2FA" 的 Granular Token（不支持）；改用网页或交互登录 |
+| `npm trust` 报 package 不存在 | 先手动发布一次该包（见"前置条件 1"），再配置 trusted publisher |
 | `Cannot publish over the previously published versions` | 版本已存在，不能覆盖；必须升版本（或换 dist-tag 发布新版本） |
-| 部分包发布失败 | `pnpm publish -r` 会逐个发布；已成功的包会保留。修复后重新执行同一命令会因版本已存在而失败——先 `pnpm --filter <失败包> publish ...` 补齐，或整体升 patch 版本 |
-| 启用 2FA 导致本地发布失败 | 用 CI + Automation/Granular Token（`NPM_TOKEN`），或改用支持 OTP 的发布方式 |
+| 部分包发布失败 | `pnpm publish -r` 会逐个发布；已成功的包会保留。修复后只补发失败包：`pnpm --filter <失败包> publish --access public --no-git-checks`，或整体升 patch 版本 |
+| provenance 未生成 / 报 provenance 错误 | 仓库非公开、runner 非 GitHub-hosted、或使用了 `--no-provenance`；公开仓库 + hosted runner 应自动生成 |
 | 误发版本 | npm 允许 72 小时内 `npm unpublish <pkg>@<version>`；超过则只能废弃（deprecate）并升版本 |
-| 需要 npm provenance 签名 | 在 GitHub Actions 中加 `id-token: write` 权限并在 npm 包设置 Trusted Publisher；或 `NPM_CONFIG_PROVENANCE=true`（公开仓库） |
+| 想改用新工作流文件名/环境 | 一个包只能存在一个 trust 配置：先 `npm trust list` + `npm trust revoke --id`，再重新配置（最多 10 个配置/包） |
 
 ## 发布后的用户安装方式
 
@@ -148,3 +257,10 @@ dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle
 ```
 
 本地 checkout 开发仍可用 `pnpm install:profile`（见主 [README](../README.md)）。
+
+## 参考
+
+- npm 文档：[Trusted publishing for npm packages](https://docs.npmjs.com/trusted-publishers/)
+- `npm trust` 命令：`npm help trust` / [npm-trust](https://docs.npmjs.com/cli/v11/commands/npm-trust)
+- pnpm：`pnpm help publish`，[pnpm publish 文档](https://pnpm.io/cli/publish)
+- OpenSSF [Trusted Publishers](https://repos.openssf.org/trusted-publishers) 标准

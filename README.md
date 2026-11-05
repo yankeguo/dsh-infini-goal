@@ -169,6 +169,16 @@ node scripts/install-profile.mjs --profile desktop --dsh-home ~/.dsh
 dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle
 ```
 
+CI 发布采用 **npm Trusted Publishing（Keyless OIDC）**：推 `v*` tag 触发
+[`.github/workflows/publish.yml`](.github/workflows/publish.yml)，由 GitHub Actions 的
+`id-token: write` 换取 npm 短时 token，**不需要 `NPM_TOKEN` secret**，公开仓库下自动附带
+provenance。每个包需一次性配置 trusted publisher：
+
+```sh
+npm login
+scripts/trusted-publishers.sh          # 批量配置 7 个包（--dry-run / --list 可选）
+```
+
 完整发版流程（版本升级、dry-run、本地/CI 发布、GitHub Release、故障处理）见
 [`docs/PUBLISHING.md`](docs/PUBLISHING.md)。
 
