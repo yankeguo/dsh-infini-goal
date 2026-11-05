@@ -182,6 +182,20 @@ scripts/trusted-publishers.sh          # 批量配置 7 个包（--dry-run / --l
 完整发版流程（版本升级、dry-run、本地/CI 发布、GitHub Release、故障处理）见
 [`docs/PUBLISHING.md`](docs/PUBLISHING.md)。
 
+## 关闭系统自带的 dsh-goal（可选）
+
+DSH 自带官方 goal 模式，与本插件可以共存（工具、命令、状态条都不同名）。若希望
+infini-goal 成为唯一目标系统，可用仓库脚本关闭官方 goal：
+
+```sh
+node scripts/disable-builtin-goal.mjs --print   # 预览将写入的 profile patch 块
+node scripts/disable-builtin-goal.mjs --write   # 写入并启用（自动备份 profile patch）
+node scripts/disable-builtin-goal.mjs --remove  # 撤销
+```
+
+原理、生效时机（preset 变更只影响新 Agent，建议重启一次 DSH）、验证与升级后维护方式见
+[`docs/DISABLE-BUILTIN-GOAL.md`](docs/DISABLE-BUILTIN-GOAL.md)。
+
 ## 开发与验证
 
 ```sh
