@@ -21,5 +21,14 @@
     "@deepseek-ai/dsh-session-projection": {
       "optional": true
     }
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yankeguo/dsh-infini-goal.git",
+    "directory": "packages/protocol"
+  },
+  "homepage": "https://github.com/yankeguo/dsh-infini-goal#readme"
 }

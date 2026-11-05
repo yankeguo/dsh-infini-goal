@@ -27,5 +27,14 @@
   },
   "engines": {
     "dsh": ">=0.2.2-rc.1 <0.3.0"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yankeguo/dsh-infini-goal.git",
+    "directory": "packages/tool"
+  },
+  "homepage": "https://github.com/yankeguo/dsh-infini-goal#readme"
 }

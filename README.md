@@ -161,6 +161,17 @@ node scripts/install-profile.mjs --profile desktop --dsh-home ~/.dsh
 - **UI 操作经命令**：状态条按钮发送 `/infini-goal ...` 命令，不引入自定义 Typert Remote。
 - **兼容性**：`engines.dsh` 约束为 `>=0.2.2-rc.1 <0.3.0`；DSH 升级到 0.3 前需要更新插件。
 
+## 发布
+
+包已推送到 npm 时可一条命令安装：
+
+```sh
+dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle
+```
+
+完整发版流程（版本升级、dry-run、本地/CI 发布、GitHub Release、故障处理）见
+[`docs/PUBLISHING.md`](docs/PUBLISHING.md)。
+
 ## 开发与验证
 
 ```sh

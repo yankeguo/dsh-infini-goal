@@ -8,6 +8,7 @@
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "files": [
@@ -35,5 +36,14 @@
   },
   "engines": {
     "dsh": ">=0.2.2-rc.1 <0.3.0"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yankeguo/dsh-infini-goal.git",
+    "directory": "packages/client-ui"
+  },
+  "homepage": "https://github.com/yankeguo/dsh-infini-goal#readme"
 }

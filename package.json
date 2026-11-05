@@ -17,7 +17,9 @@
     "dev:patch": "node scripts/dev-patch.mjs",
     "verify": "pnpm run typecheck && pnpm run test && pnpm run build",
     "install:profile": "node scripts/install-profile.mjs",
-    "uninstall:profile": "node scripts/install-profile.mjs --uninstall"
+    "uninstall:profile": "node scripts/install-profile.mjs --uninstall",
+    "release:dry": "pnpm build && pnpm publish -r --dry-run --access public --no-git-checks --tag latest",
+    "release:publish": "pnpm build && pnpm publish -r --access public --no-git-checks --tag latest"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.1.0",
