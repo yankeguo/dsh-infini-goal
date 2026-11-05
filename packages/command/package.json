@@ -1,6 +1,6 @@
 {
   "name": "@yankeguo/dsh-command-infini-goal",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Human-facing /infini-goal slash command for the endless goal with pacing and quiet windows.",
   "license": "MIT",
   "type": "module",

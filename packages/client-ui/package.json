@@ -1,6 +1,6 @@
 {
   "name": "@yankeguo/dsh-client-ui-infini-goal",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Infini-goal status bar above the composer: phase, rounds, trigger pacing, quiet-window state, and lifecycle controls.",
   "license": "MIT",
   "type": "module",

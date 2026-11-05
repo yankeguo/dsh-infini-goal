@@ -1,7 +1,7 @@
 {
   "name": "@yankeguo/dsh-infini-goal",
-  "version": "0.1.0",
-  "description": "Event-sourced endless goal state (\u65e0\u8f6e\u6b21\u4e0a\u9650 + \u6700\u5c0f\u89e6\u53d1\u95f4\u9694 + \u9759\u9ed8\u65f6\u6bb5) for the DeepSeek Harness.",
+  "version": "0.1.1",
+  "description": "Event-sourced endless goal state (无轮次上限 + 最小触发间隔 + 静默时段) for the DeepSeek Harness.",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
