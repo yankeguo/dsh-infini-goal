@@ -33,6 +33,7 @@ pnpm workspace，`packages/*`：
 | `command` | `@yankeguo/dsh-command-infini-goal` | 人类命令 `/infini-goal` |
 | `client-ui` | `@yankeguo/dsh-client-ui-infini-goal` | 浏览器 UI：composer 上方的 InfiniGoalBar（状态、倒计时、静默提示、pause/resume/clear） |
 | `bundle` | `@yankeguo/dsh-infini-goal-bundle` | bundle 包：`cordis.patch.yml` 把所有插件插入 profile + 依赖声明 |
+| `disable-goal-bundle` | `@yankeguo/dsh-disable-goal-bundle` | 可选伴生 bundle：一层 patch 关闭系统自带 dsh-goal（无运行时代码，可开关） |
 
 构建：`pnpm build` 用 esbuild：
 - host 入口 `src/index.ts` → `lib/index.js`，只 external `@deepseek-ai/*` 与 `node:*`，

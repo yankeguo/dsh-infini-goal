@@ -147,6 +147,12 @@ importers:
         specifier: workspace:*
         version: link:../protocol
 
+  packages/disable-goal-bundle:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: ~4.1.0
+        version: 4.1.0(@deepseek-ai/cordis-plugin-include@1.1.0)(@deepseek-ai/cordis-plugin-loader@1.1.0)
+
   packages/driver:
     dependencies:
       '@deepseek-ai/cordis':

@@ -100,4 +100,15 @@ dsh web --patch .tmp/cordis.patch.yml --port 34000 --no-open
 - 每个 Session 同时只有一个 infini-goal；与官方 `dsh-goal` 的 `/goal`、`get_goal` 等互不冲突。
 - 兼容性：`engines.dsh: >=0.2.2-rc.1 <0.3.0`。
 
+## 配套 bundle
+
+如果想让本套件成为唯一的目标系统，安装可选伴生 bundle 关闭系统自带的 dsh-goal
+（可在 Plugins 页面开关，profile patch 保持干净）：
+
+```sh
+dsh plugin --profile desktop add @yankeguo/dsh-disable-goal-bundle
+```
+
+详见 [`@yankeguo/dsh-disable-goal-bundle`](../disable-goal-bundle/README.md)。
+
 完整文档与设计说明见仓库 README 与 `docs/DESIGN.md`。

@@ -26,6 +26,7 @@ const TARGETS = [
   { dir: 'command', entries: ['index'] },
   { dir: 'client-ui', entries: ['index'], client: 'client/index' },
   { dir: 'bundle', source: false },
+  { dir: 'disable-goal-bundle', source: false },
 ]
 
 /** Shared esbuild options for a Host plugin bundle. */

@@ -3,102 +3,141 @@
 DSH 默认自带官方 goal 模式（`dsh-goal` / `dsh-tool-goal` / `dsh-command-goal` /
 `dsh-goal-round-driver` / `dsh-client-ui-goal`）。装了本插件后两套目标系统可以共存
 （工具名、命令名、状态条都不同名），但如果你希望 **infini-goal 成为唯一的目标系统**，
-可以用本仓库的脚本把官方 goal 模式关掉。
+推荐安装可选的伴生 bundle：
+
+```sh
+dsh plugin --profile desktop add @yankeguo/dsh-disable-goal-bundle
+```
+
+启用即关闭官方 goal，**禁用（在 Plugins 里取消勾选）即恢复**，profile 的
+`cordis.patch.yml` 保持干净。本地 checkout 用 `pnpm install:profile --disable-builtin-goal`。
+
+想先了解机制再决定？见下面"为什么不能直接禁用 `goal` 服务"和"bundle 里是什么"。
 
 ## 为什么不能直接禁用 `goal` 服务
 
 官方 Web 组合里，`goal` **服务**留在 host 平面，而 `command-goal` / `tool-goal`
-是按 **agent preset** 挂载的（见 `dsh-web-app/presets/*.patch.yml`）。如果直接
-`- id: goal / disabled: true`，创建会话会失败：
+是按 **agent preset** 挂载的（`dsh-web-app/presets/*.patch.yml`）。如果直接
+`- id: goal / disabled: true`，preset 绑定会失败：
 
 ```
 agent-preset/invalid: command-goal (@deepseek-ai/dsh-command-goal): waiting for goals
 tool-goal (@deepseek-ai/dsh-tool-goal): waiting for goals
 ```
 
-所以正确做法是保留 `goal` 服务（惰性、无害，旧会话里的 `goal/change` 事件也能正常回放），
-只去掉自动续跑驱动器、状态条，以及各 preset 里的命令/工具行。
+所以 bundle 保留 `goal` 服务（惰性、无害，历史 `goal/change` 事件仍能回放），只去掉：
 
-## 生成的补丁做了什么
+- `goal-round-driver`：不再有官方自动轮次；
+- `ui-goal`：composer 上方不再有官方 GoalBar；
+- 三个 shipped preset（`standard` / `ptc` / `cordis`）子插件列表中的
+  `command-goal` 与 `tool-goal`：新 Agent 不再有 `/goal` 命令和
+  `get_goal` / `create_goal` / `update_goal` 工具。
 
-[`scripts/disable-builtin-goal.mjs`](../scripts/disable-builtin-goal.mjs) 从**已安装的
-DSH app.asar** 里读取三个 shipped preset（`standard` / `ptc` / `cordis`）的原始定义，
-生成并写入一个带标记的 profile patch 块：
+为什么必须重写 preset 的整段子列表：profile patch 只能按 **loader 行 id** 覆盖，
+preset 里的 `plugins` 是那一行的 **config 数据**（Session 绑定时才插进 registry 自己的
+Loader tree），不是 profile 的 loader 行；patch 的 `config` 又是**整体替换**而非深合并。
+这是 `@deepseek-ai/dsh-agent-preset-registry` 的已知取舍：
+
+> *"a user override replaces the complete child list rather than merging future builtin changes."*
+
+## 方式 A：伴生 bundle（推荐）
+
+### 安装（发布到 npm 后）
+
+```sh
+# CLI 安装并启用
+dsh plugin --profile desktop add @yankeguo/dsh-disable-goal-bundle
+
+# 或在 Web：Plugins → Add plugin → 输入 @yankeguo/dsh-disable-goal-bundle
+```
+
+### 本地 checkout
+
+```sh
+pnpm build
+node scripts/install-profile.mjs --disable-builtin-goal
+```
+
+该命令会：链接所有 workspace 包到 profile `node_modules`、选中主 bundle 与
+disable-goal bundle、并把之前脚本写进 profile patch 的旧块自动移除（有备份）。
+
+### 开关
+
+- **关闭官方 goal**：Plugins 页面勾选 `@yankeguo/dsh-disable-goal-bundle`（或保留在
+  profile `dsh.profile.bundles` 里）；
+- **恢复官方 goal**：取消勾选 / 从 `dsh.profile.bundles` 移除，HMR 会移除该层；
+- preset 变更只影响**之后创建的 Agent**，彻底生效建议重启一次 DSH。
+
+### 验证
+
+- 新建会话 → `/` 菜单没有 `/goal`，只有 `/infini-goal`；
+- 模型工具列表没有 `get_goal` / `create_goal` / `update_goal`，有 `*_infini_goal`；
+- composer 上方只有 infini-goal 状态条。
+
+## 方式 B：脚本写 profile patch（自定义 profile / 不装 bundle）
+
+适合没有走 bundle 安装、或想给非 desktop profile 单个开关的场景：
+
+```sh
+# 预览生成的 patch 块
+node scripts/disable-builtin-goal.mjs --print
+
+# 写入 profile patch（默认 ~/.dsh/profiles/desktop/cordis.patch.yml，自动备份）
+node scripts/disable-builtin-goal.mjs --write
+
+# 撤销（只删除生成块，保留你自己的其它 patch）
+node scripts/disable-builtin-goal.mjs --remove
+
+# 其它 profile
+node scripts/disable-builtin-goal.mjs --write --profile-patch ~/.dsh/profiles/<name>/cordis.patch.yml
+```
+
+生成块用 `# BEGIN/END dsh-infini-goal: disable builtin dsh-goal` 标记包住，
+`--write` 会替换旧块、`--remove` 精确删除；`--exclude ptc,cordis` 可只覆盖部分 preset。
+**不要和方式 A 同时用**（内容相同但重复）；`install-profile.mjs --disable-builtin-goal`
+会自动清掉旧块。
+
+## bundle 里是什么
+
+[`packages/disable-goal-bundle/cordis.patch.yml`](../packages/disable-goal-bundle/cordis.patch.yml)
+是一个普通 bundle 层（无运行时代码），由脚本从**已安装的 DSH app.asar** 读取 shipped
+preset 后生成：
 
 ```yaml
 - id: goal-round-driver
-  disabled: true          # 关闭官方自动轮次驱动器
-
+  disabled: true
 - id: ui-goal
-  disabled: true          # 关闭 composer 上方的官方 GoalBar
-
-- id: preset-standard     # 用官方定义去掉 command-goal / tool-goal 后覆盖
+  disabled: true
+- id: preset-standard      # config.plugins = shipped 列表去掉 command-goal/tool-goal
   name: '@deepseek-ai/dsh-agent-preset'
   config: { ... }
-
 - id: preset-ptc
-  ...
 - id: preset-cordis
-  ...
 ```
 
-效果（对新创建的 Agent / 重启后的会话）：
+包信息见 [`packages/disable-goal-bundle/README.md`](../packages/disable-goal-bundle/README.md)。
 
-- 模型工具列表里不再有 `get_goal` / `create_goal` / `update_goal`；
-- 命令菜单里不再有 `/goal`（`/infini-goal` 保留）；
-- 官方 goal 的自动续跑停止，GoalBar 不再渲染；
-- `goal` 服务仍挂载，历史会话回放与 preset 激活保持正常。
+## 维护：DSH 升级后重新生成
 
-## 用法
+bundle 的 preset 覆盖是 DSH shipped preset 的**快照**（生成头里记录了 DSH 版本，当前
+`0.2.2-rc.1`）。DSH 升级后：
 
 ```sh
 cd /Users/guoyk/Workspace/src/github.com/yankeguo/dsh-infini-goal
-
-# 预览生成的补丁（不写文件）
-node scripts/disable-builtin-goal.mjs --print
-
-# 写入 profile patch（默认 ~/.dsh/profiles/desktop/cordis.patch.yml）
-node scripts/disable-builtin-goal.mjs --write
-
-# 自定义 profile / DSH 安装路径
-node scripts/disable-builtin-goal.mjs --write \
-  --profile-patch ~/.dsh/profiles/desktop/cordis.patch.yml \
-  --app-asar "/Applications/DeepSeek Harness.app/Contents/Resources/app.asar"
-
-# 撤销（移除生成块，保留你自己的其它补丁）
-node scripts/disable-builtin-goal.mjs --remove
+node scripts/build-disable-goal-bundle.mjs          # 重新生成 cordis.patch.yml
+node scripts/build-disable-goal-bundle.mjs --check  # 发布前/CI 检查是否过期
 ```
 
-脚本行为：
-
-- 写入前自动备份 profile patch（`cordis.patch.yml.bak-disable-goal-<时间戳>`）；
-- 用 `# BEGIN/END dsh-infini-goal: disable builtin dsh-goal` 标记包住生成块，
-  `--remove` 只删除这一块，重复 `--write` 会先替换旧块；
-- 读取 app.asar 时使用 Electron 自带的 Node（`ELECTRON_RUN_AS_NODE=1`），无需额外依赖；
-  也可用 `--presets-dir <dir>` 直接读取解包后的 preset 目录（测试用）；
-- `--exclude ptc,cordis` 可跳过某些 preset。
-
-## 生效时机与验证
-
-- profile patch 由 HMR 监听，保存后立即重新组合：
-  `goal-round-driver` / `ui-goal` 立即卸载；
-- **preset 定义的修改只影响之后创建的 Agent**：已经打开的会话仍保留启动时挂载的
-  `get_goal`/`/goal`，直到会话重新创建或应用重启。建议 **重启一次 DSH Desktop**，
-  之后所有新旧会话都按新 preset 创建；
-- 验证：新建一个会话 → 输入 `/` 看菜单里没有 `/goal`；状态条只有 infini-goal 的；
-  让模型读工具列表（或看 `request/header` 的 tools）不应出现 `get_goal`。
-
-本仓库的隔离 E2E 已用**同一份生成补丁**验证：会话创建成功、`request/header` 工具目录
-31 个工具、无 `get_goal/create_goal/update_goal`、`create_infini_goal/get_infini_goal/
-update_infini_goal` 正常存在。
+脚本用 Electron 自带 Node 读 app.asar（`ELECTRON_RUN_AS_NODE=1`），无需解包、无额外依赖；
+preset 文件改名时会报错退出而不是写坏 patch。生成后按 semver 升 patch 版本发布即可，
+插件市场/Plugins 页会提示更新。
 
 ## 注意事项
 
-- **DSH 升级后需要重新生成**：官方 preset 定义随版本变化，升级后重新执行
-  `node scripts/disable-builtin-goal.mjs --write`（脚本会读取新版本的 preset 并替换旧块）。
-  如果升级改名了 preset 文件，脚本会报错退出，不会写坏 patch。
-- **已有的官方 goal**：`goal` 服务保留但不再有 UI/工具/驱动器，已有目标会处于惰性状态；
-  如果之后需要清理，可 `--remove` 恢复官方 goal 后用 `/goal clear` 清掉，再重新写入。
-- 其它 profile：`--profile-patch` 指向对应 profile 的 `cordis.patch.yml` 即可；默认为 desktop。
-- 撤销成功后官方 goal 模式恢复，但 HMR 对 preset 的修改同样只影响新 Agent，
-  彻底恢复也建议重启一次。
+- bundle 会冻结 `standard` / `ptc` / `cordis` 的子插件列表：DSH 升级后新增的 shipped
+  插件不会自动出现在这些 preset 里，直到重新生成。`minimal` preset 没有 goal 行，
+  不需要覆盖。
+- 已有官方 goal 会变成惰性状态（服务在、driver/工具/UI 不在）。需要清理时先禁用本
+  bundle、用 `/goal clear` 清空，再重新启用。
+- `goal` 服务仍挂载；如果未来 DSH 改变 preset 布局（比如把 goal 移到独立 plugin group），
+  重新生成脚本会感知到并更新覆盖方式。

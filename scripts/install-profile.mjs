@@ -3,27 +3,40 @@
  * Link the built infini-goal plugin suite into a DSH profile.
  *
  * This is the self-install path for a local checkout:
- *   - symlinks every `@yankeguo/dsh-*-infini-goal*` package into
- *     `$DSH_HOME/profiles/<profile>/node_modules/`;
- *   - appends the bundle package name to the profile's `dsh.profile.bundles`.
+ *   - symlinks every `@yankeguo/dsh-*` workspace package into
+ *     `$DSH_HOME/profiles/<profile>/node_modules/@yankeguo/`;
+ *   - appends the main bundle to the profile's `dsh.profile.bundles`;
+ *   - with `--disable-builtin-goal`, also selects the optional
+ *     `@yankeguo/dsh-disable-goal-bundle` companion and removes a previously
+ *     generated profile-patch block that did the same thing.
  *
- * The profile's HMR then composes the new bundle live when it is enabled;
- * otherwise restart DSH. A Web page reload loads the client UI row.
+ * The profile's HMR composes the selection live; restart DSH once so every
+ * existing session is bound to the new preset revisions.
  *
  * Usage:
- *   node scripts/install-profile.mjs [--profile desktop] [--dsh-home ~/.dsh] [--uninstall] [--dry-run]
+ *   node scripts/install-profile.mjs [--profile desktop] [--dsh-home ~/.dsh]
+ *                                    [--disable-builtin-goal] [--uninstall] [--dry-run]
  */
-import { existsSync, readFileSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync, copyFileSync } from 'node:fs'
+import { copyFileSync, existsSync, readFileSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { mkdir, readdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { BLOCK_BEGIN, removeGeneratedBlock } from './lib/disable-goal.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const MAIN_BUNDLE = '@yankeguo/dsh-infini-goal-bundle'
+const DISABLE_GOAL_BUNDLE = '@yankeguo/dsh-disable-goal-bundle'
 
 /** Parse `--flag value` and boolean `--flag` arguments. */
 function parseArgs(argv) {
-  const options = { profile: 'desktop', dshHome: process.env.DSH_HOME ?? join(homedir(), '.dsh'), uninstall: false, dryRun: false }
+  const options = {
+    profile: 'desktop',
+    dshHome: process.env.DSH_HOME ?? join(homedir(), '.dsh'),
+    uninstall: false,
+    dryRun: false,
+    disableBuiltinGoal: false,
+  }
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
     switch (arg) {
@@ -39,10 +52,14 @@ function parseArgs(argv) {
       case '--dry-run':
         options.dryRun = true
         break
+      case '--disable-builtin-goal':
+        options.disableBuiltinGoal = true
+        break
       case '--help':
       case '-h':
-        console.log('Usage: node scripts/install-profile.mjs [--profile desktop] [--dsh-home <dir>] [--uninstall] [--dry-run]')
+        console.log('Usage: node scripts/install-profile.mjs [--profile desktop] [--dsh-home <dir>] [--disable-builtin-goal] [--uninstall] [--dry-run]')
         process.exit(0)
+      // fallthrough for unknown flags
       default:
         throw new Error(`unknown argument: ${String(arg)}`)
     }
@@ -75,21 +92,27 @@ async function main() {
     throw new Error(`profile "${options.profile}" not found at ${profileDir} (set --dsh-home/--profile)`)
   }
   const packages = await readPackages()
+  const byName = new Map(packages.map(entry => [entry.manifest.name, entry]))
+  const mainBundle = byName.get(MAIN_BUNDLE)
+  const disableBundle = byName.get(DISABLE_GOAL_BUNDLE)
+  if (mainBundle === undefined) throw new Error(`workspace package ${MAIN_BUNDLE} not found`)
+  if (options.disableBuiltinGoal && disableBundle === undefined) {
+    throw new Error(`workspace package ${DISABLE_GOAL_BUNDLE} not found`)
+  }
   const missingBuild = packages.filter(entry => entry.manifest.dsh?.bundle === undefined && !existsSync(entry.built))
   if (missingBuild.length > 0) {
     throw new Error(`run "pnpm build" first; missing: ${missingBuild.map(entry => entry.manifest.name).join(', ')}`)
   }
-  const bundle = packages.find(entry => entry.manifest.dsh?.bundle !== undefined)
-  if (bundle === undefined) throw new Error('no bundle package found under packages/')
 
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
   manifest.dsh ??= {}
   manifest.dsh.profile ??= {}
   const bundles = Array.isArray(manifest.dsh.profile.bundles) ? manifest.dsh.profile.bundles : []
   const scopedDir = join(profileDir, 'node_modules', '@yankeguo')
+  const patchPath = join(profileDir, 'cordis.patch.yml')
 
   if (options.uninstall) {
-    const next = bundles.filter(name => name !== bundle.manifest.name)
+    const next = bundles.filter(name => name !== MAIN_BUNDLE && name !== DISABLE_GOAL_BUNDLE)
     if (!options.dryRun) {
       backup(manifestPath)
       manifest.dsh.profile.bundles = next
@@ -99,15 +122,16 @@ async function main() {
         if (isSymlink(linkPath)) unlinkSync(linkPath)
       }
     }
-    console.log(`${options.dryRun ? '[dry-run] ' : ''}uninstalled ${bundle.manifest.name} from profile ${options.profile}`)
+    console.log(`${options.dryRun ? '[dry-run] ' : ''}uninstalled ${MAIN_BUNDLE} from profile ${options.profile}`)
     return
   }
 
-  if (!bundles.includes(bundle.manifest.name)) bundles.push(bundle.manifest.name)
+  if (!bundles.includes(MAIN_BUNDLE)) bundles.push(MAIN_BUNDLE)
+  if (options.disableBuiltinGoal && !bundles.includes(DISABLE_GOAL_BUNDLE)) {
+    bundles.push(DISABLE_GOAL_BUNDLE)
+  }
+
   if (!options.dryRun) {
-    backup(manifestPath)
-    manifest.dsh.profile.bundles = bundles
-    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
     await mkdir(scopedDir, { recursive: true })
     for (const entry of packages) {
       const linkPath = join(scopedDir, entry.manifest.name.replace(/^@[^/]+\//u, ''))
@@ -116,14 +140,42 @@ async function main() {
         if (target === entry.dir) continue
         unlinkSync(linkPath)
       } else if (existsSync(linkPath)) {
+        // A profile installed through the plugin manager owns real package
+        // directories (pnpm layout). Leave an equivalent installed copy alone
+        // and only link the packages this checkout adds.
+        const installedManifest = join(linkPath, 'package.json')
+        if (existsSync(installedManifest)) {
+          const installed = JSON.parse(readFileSync(installedManifest, 'utf8'))
+          if (installed.name === entry.manifest.name) {
+            console.log(`kept installed package ${entry.manifest.name} (${installed.version ?? 'unknown'})`)
+            continue
+          }
+        }
         throw new Error(`${linkPath} exists and is not a symlink; refusing to replace it`)
       }
       symlinkSync(entry.dir, linkPath, 'dir')
       console.log(`linked ${entry.manifest.name} -> ${entry.dir}`)
     }
+    if (options.disableBuiltinGoal && existsSync(patchPath)) {
+      const text = readFileSync(patchPath, 'utf8')
+      if (text.includes(BLOCK_BEGIN)) {
+        backup(patchPath)
+        writeFileSync(patchPath, removeGeneratedBlock(text))
+        console.log(`removed a previously generated disable-goal block from ${patchPath}`)
+      }
+    }
+    backup(manifestPath)
+    manifest.dsh.profile.bundles = bundles
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
   }
-  console.log(`${options.dryRun ? '[dry-run] ' : ''}enabled ${bundle.manifest.name} in profile ${options.profile}`)
-  console.log('Reload the Web page (or restart DSH) to load the client UI bar.')
+
+  console.log(`${options.dryRun ? '[dry-run] ' : ''}enabled ${MAIN_BUNDLE} in profile ${options.profile}`)
+  if (options.disableBuiltinGoal) {
+    console.log(`${options.dryRun ? '[dry-run] ' : ''}enabled ${DISABLE_GOAL_BUNDLE} (built-in dsh-goal mode off; toggle it in Plugins)`)
+  } else {
+    console.log('built-in dsh-goal mode left untouched; pass --disable-builtin-goal to turn it off')
+  }
+  console.log('Restart DSH once so existing sessions bind to the new preset revisions.')
   console.log('Try: /infini-goal <objective>   or ask the model to create an infini goal.')
 }
 
@@ -137,7 +189,7 @@ function isSymlink(path) {
   }
 }
 
-/** Keep one timestamped backup before rewriting the profile manifest. */
+/** Keep one timestamped backup before rewriting a file. */
 function backup(path) {
   const stamp = new Date().toISOString().replaceAll(':', '-')
   const target = `${path}.bak-infini-goal-${stamp}`

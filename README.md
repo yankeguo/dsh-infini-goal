@@ -51,6 +51,7 @@ packages/
   command/     @yankeguo/dsh-command-infini-goal    /infini-goal 人类命令
   client-ui/   @yankeguo/dsh-client-ui-infini-goal  浏览器状态条
   bundle/      @yankeguo/dsh-infini-goal-bundle     bundle：cordis.patch.yml + 依赖
+  disable-goal-bundle/  @yankeguo/dsh-disable-goal-bundle  可选伴生 bundle：关闭系统自带 dsh-goal
 ```
 
 构建产物为每个包的 `lib/index.js`（浏览器包另有 `lib/client.js`）。构建用 esbuild：
@@ -185,15 +186,17 @@ scripts/trusted-publishers.sh          # 批量配置 7 个包（--dry-run / --l
 ## 关闭系统自带的 dsh-goal（可选）
 
 DSH 自带官方 goal 模式，与本插件可以共存（工具、命令、状态条都不同名）。若希望
-infini-goal 成为唯一目标系统，可用仓库脚本关闭官方 goal：
+infini-goal 成为唯一目标系统，安装可选的伴生 bundle 即可，profile 的
+`cordis.patch.yml` 保持干净：
 
 ```sh
-node scripts/disable-builtin-goal.mjs --print   # 预览将写入的 profile patch 块
-node scripts/disable-builtin-goal.mjs --write   # 写入并启用（自动备份 profile patch）
-node scripts/disable-builtin-goal.mjs --remove  # 撤销
+dsh plugin --profile desktop add @yankeguo/dsh-disable-goal-bundle   # 发布后
+pnpm install:profile --disable-builtin-goal                          # 本地 checkout
 ```
 
-原理、生效时机（preset 变更只影响新 Agent，建议重启一次 DSH）、验证与升级后维护方式见
+随后在 **Plugins** 页面勾选/取消该 bundle 即可实时开关官方 goal 模式。
+原理（为什么不能直接禁 `goal` 服务、preset patch 粒度等）、生效时机（preset 变更只影响
+新 Agent，建议重启一次 DSH）、脚本方式与升级后维护见
 [`docs/DISABLE-BUILTIN-GOAL.md`](docs/DISABLE-BUILTIN-GOAL.md)。
 
 ## 开发与验证

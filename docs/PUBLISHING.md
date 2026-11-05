@@ -1,6 +1,6 @@
 # 发布指南
 
-本仓库是一个 pnpm workspace，包含 **7 个可发布包**（6 个功能包 + 1 个 bundle）：
+本仓库是一个 pnpm workspace，包含 **8 个可发布包**（6 个功能包 + 2 个 bundle）：
 
 | 顺序 | 包 | 说明 |
 | --- | --- | --- |
@@ -11,9 +11,11 @@
 | 5 | `@yankeguo/dsh-command-infini-goal` | `/infini-goal` 命令 |
 | 6 | `@yankeguo/dsh-client-ui-infini-goal` | 浏览器状态条 |
 | 7 | `@yankeguo/dsh-infini-goal-bundle` | 安装入口 bundle |
+| 8 | `@yankeguo/dsh-disable-goal-bundle` | 可选伴生 bundle：关闭系统自带 dsh-goal（纯 patch 层，无运行时代码） |
 
-`pnpm publish -r` 会按依赖拓扑自动排序，**bundle 最后发布**；bundle 的
-`workspace:*` 依赖在打包时会被改写为当前精确版本（`0.1.0` 等）。
+`pnpm publish -r` 会按依赖拓扑自动排序，**功能包先发、主 bundle 最后发布**；
+bundle 的 `workspace:*` 依赖在打包时会被改写为当前精确版本（`0.1.0` 等）。
+`@yankeguo/dsh-disable-goal-bundle` 只含 patch 层，无构建产物也无 workspace 依赖。
 
 ## 两种发布方式
 
@@ -144,7 +146,7 @@ pnpm install --frozen-lockfile     # 锁文件一致
 pnpm typecheck                     # TS 检查
 pnpm test                          # 单元测试（vitest）
 pnpm build                         # 生成 packages/*/lib（lib 被 gitignore，发布时必须现构建）
-pnpm release:dry                   # 递归 dry-run：打印 7 个包的发布计划，不上传
+pnpm release:dry                   # 递归 dry-run：打印 8 个包的发布计划，不上传
 ```
 
 抽查打包内容（可选，但推荐在首次发布或改 `files` 后做）：
