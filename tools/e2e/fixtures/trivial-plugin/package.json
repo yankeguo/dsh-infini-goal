@@ -1,0 +1,16 @@
+{
+  "name": "e2e-trivial-plugin",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Trivial dual-face DSH plugin fixture: proves the E2E harness can insert a plugin by absolute filesystem path and see both its host half and its browser (client) half loaded.",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web"
+    }
+  }
+}

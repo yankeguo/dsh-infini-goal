@@ -1,0 +1,52 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": [
+      "ES2024",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": [
+      "node"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@yankeguo/dsh-infini-goal-protocol": [
+        "./packages/protocol/src/index.ts"
+      ],
+      "@yankeguo/dsh-infini-goal-protocol/client": [
+        "./packages/protocol/src/client.ts"
+      ],
+      "@yankeguo/dsh-infini-goal": [
+        "./packages/infini-goal/src/index.ts"
+      ],
+      "@yankeguo/dsh-infini-goal-driver": [
+        "./packages/driver/src/index.ts"
+      ],
+      "@yankeguo/dsh-tool-infini-goal": [
+        "./packages/tool/src/index.ts"
+      ],
+      "@yankeguo/dsh-command-infini-goal": [
+        "./packages/command/src/index.ts"
+      ],
+      "@yankeguo/dsh-client-ui-infini-goal": [
+        "./packages/client-ui/src/index.ts"
+      ]
+    },
+    "allowImportingTsExtensions": true
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "e2e-control-plugin",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "E2E control surface: host-side HTTP routes that drive the infini-goal suite host services (ctx.agents + ctx.infiniGoals) directly in the isolated DSH instance.",
+  "exports": {
+    ".": "./index.js"
+  }
+}

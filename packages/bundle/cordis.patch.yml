@@ -1,0 +1,14 @@
+- insert:
+    - id: infini-goal
+      name: '@yankeguo/dsh-infini-goal'
+      config:
+        defaultMinIntervalMs: 60000
+        defaultQuietWindows: []
+    - id: infini-goal-driver
+      name: '@yankeguo/dsh-infini-goal-driver'
+    - id: infini-goal-tool
+      name: '@yankeguo/dsh-tool-infini-goal'
+    - id: infini-goal-command
+      name: '@yankeguo/dsh-command-infini-goal'
+    - id: infini-goal-ui
+      name: '@yankeguo/dsh-client-ui-infini-goal'

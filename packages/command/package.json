@@ -1,0 +1,27 @@
+{
+  "name": "@yankeguo/dsh-command-infini-goal",
+  "version": "0.1.0",
+  "description": "Human-facing /infini-goal slash command for the endless goal with pacing and quiet windows.",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/dsh-commands": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.1"
+  },
+  "dependencies": {
+    "@yankeguo/dsh-infini-goal": "workspace:*",
+    "@yankeguo/dsh-infini-goal-protocol": "workspace:*"
+  },
+  "engines": {
+    "dsh": ">=0.2.2-rc.1 <0.3.0"
+  }
+}

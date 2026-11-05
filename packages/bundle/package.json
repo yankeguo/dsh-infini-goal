@@ -1,0 +1,37 @@
+{
+  "name": "@yankeguo/dsh-infini-goal-bundle",
+  "version": "0.1.0",
+  "description": "Endless goal mode for DeepSeek Harness: no round cap, a minimum trigger interval, and quiet time windows where the goal waits for assigned work.",
+  "license": "MIT",
+  "type": "module",
+  "icon": "./icon.svg",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml",
+      "listedByDefault": false
+    }
+  },
+  "exports": {
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md",
+    "docs"
+  ],
+  "dependencies": {
+    "@yankeguo/dsh-infini-goal": "workspace:*",
+    "@yankeguo/dsh-infini-goal-driver": "workspace:*",
+    "@yankeguo/dsh-tool-infini-goal": "workspace:*",
+    "@yankeguo/dsh-command-infini-goal": "workspace:*",
+    "@yankeguo/dsh-client-ui-infini-goal": "workspace:*"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.1.0"
+  },
+  "engines": {
+    "dsh": ">=0.2.2-rc.1 <0.3.0"
+  }
+}
