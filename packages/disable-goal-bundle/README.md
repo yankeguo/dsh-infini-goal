@@ -31,13 +31,17 @@ pnpm install:profile --disable-builtin-goal
 
 ## 它到底改了什么
 
-一个 bundle patch 层，包含 5 个 patch 条目：
+一个 bundle patch 层，**不复制任何 preset 子插件列表**：
 
 | 条目 | 作用 |
 | --- | --- |
 | `goal-round-driver` / `disabled: true` | 关闭官方自动续跑驱动器 |
 | `ui-goal` / `disabled: true` | 关闭 composer 上方的官方 GoalBar |
-| `preset-standard` / `preset-ptc` / `preset-cordis` 覆盖 | 用 shipped 子插件列表去掉 `command-goal`、`tool-goal` 后覆盖 |
+| `preset-standard` / `preset-ptc` / `preset-cordis` / `disabled: true` | 停用 shipped preset 声明 |
+| `insert` 三个 `preset-*-filter` 行 | 挂载本包的 `preset-filter` 插件：启动时通过 Loader 的模块解析读取**已安装的** shipped preset 声明（支持 app.asar），过滤掉 `command-goal` / `tool-goal` 后挂载真正的 `@deepseek-ai/dsh-agent-preset` |
+
+这样只"禁用要禁用的"，不冻结 preset 内容：DSH 升级后的 shipped preset 变化会自动生效，
+**不需要重新生成 bundle**。
 
 为什么不能直接关掉 `goal` 服务：官方 Web 组合把 `goal` 服务留在 host 平面，
 `command-goal` / `tool-goal` 按 agent preset 挂载；服务缺失会让 preset 激活失败
@@ -47,21 +51,22 @@ pnpm install:profile --disable-builtin-goal
 
 ## 维护
 
-bundle 里的 preset 覆盖是 DSH shipped preset 的快照（当前按 **DSH 0.2.2-rc.1** 生成）。
-DSH 升级后重新生成并发布：
+默认的 bundle patch 是**动态**的：只有 2 个 host 行禁用、3 个 preset 声明禁用和 3 个
+filter 行，不随 DSH 版本变化，**DSH 升级后无需重新生成**。`scripts/build-disable-goal-bundle.mjs`
+只用于重新生成/校验这个静态文件本身（默认输出动态版本、`--check` 检查是否最新）。
+
+如果未来 DSH 改动了 Loader / preset 内部机制导致动态 filter 失效，可用快照回退：
 
 ```sh
-node scripts/build-disable-goal-bundle.mjs          # 重新生成 cordis.patch.yml
-node scripts/build-disable-goal-bundle.mjs --check  # CI / 发布前检查是否过期
+node scripts/build-disable-goal-bundle.mjs --static   # 用已安装 app.asar 生成完整快照
 ```
 
-脚本直接从已安装的 DSH `app.asar` 读取 shipped preset（Electron-as-Node，无需解包）。
-如果升级后 preset 文件改名，脚本会报错退出，不会写坏 patch。
+`--static` 会冻结 shipped preset 子插件列表，之后每次 DSH 升级都需要重新生成。
 
 ## 限制
 
-- 它冻结 `standard` / `ptc` / `cordis` 三个 preset 的子插件列表：DSH 升级后新增的
-  shipped 插件不会自动出现在这些 preset 里，需要重新生成 bundle。
+- 动态 filter 依赖 Loader 的 `!!js`/模块解析与 shipped preset 文件布局；DSH 大版本升级后
+  建议先跑一次隔离验证，必要时用 `--static` 回退（快照会冻结 preset 子插件列表）。
 - 官方 `goal` 服务仍然挂载；已存在的官方 goal 会变成惰性状态。需要清理时先禁用本
   bundle、用 `/goal clear` 清空，再重新启用。
 - 与 `@yankeguo/dsh-infini-goal-bundle` 配套使用；单独启用没有意义（只是关掉官方 goal）。

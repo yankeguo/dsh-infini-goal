@@ -77,3 +77,4 @@ minimumReleaseAgeExclude:
   - '@deepseek-ai/dsh-working-directory@0.2.2-rc.1'
   - '@deepseek-ai/dsh-workspace@0.2.2-rc.1'
   - '@deepseek-ai/schemastery@3.19.0'
+  - '@deepseek-ai/dsh-agent-preset@0.2.2-rc.1'

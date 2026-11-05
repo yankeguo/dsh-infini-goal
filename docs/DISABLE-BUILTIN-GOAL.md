@@ -94,50 +94,64 @@ node scripts/disable-builtin-goal.mjs --write --profile-patch ~/.dsh/profiles/<n
 
 生成块用 `# BEGIN/END dsh-infini-goal: disable builtin dsh-goal` 标记包住，
 `--write` 会替换旧块、`--remove` 精确删除；`--exclude ptc,cordis` 可只覆盖部分 preset。
+默认是静态快照（自包含、需随 DSH 升级重新生成）；加 `--dynamic` 可输出和伴生 bundle 相同的
+小动态块（要求 `@yankeguo/dsh-disable-goal-bundle` 已链接进该 profile）。
 **不要和方式 A 同时用**（内容相同但重复）；`install-profile.mjs --disable-builtin-goal`
 会自动清掉旧块。
 
-## bundle 里是什么
+## bundle 里是什么（动态，不复制 preset）
 
 [`packages/disable-goal-bundle/cordis.patch.yml`](../packages/disable-goal-bundle/cordis.patch.yml)
-是一个普通 bundle 层（无运行时代码），由脚本从**已安装的 DSH app.asar** 读取 shipped
-preset 后生成：
+只有几十行，**不复制任何 preset 子插件列表**：
 
 ```yaml
-- id: goal-round-driver
+- id: goal-round-driver     # 关闭官方自动轮次
   disabled: true
-- id: ui-goal
+- id: ui-goal                # 关闭官方 GoalBar
   disabled: true
-- id: preset-standard      # config.plugins = shipped 列表去掉 command-goal/tool-goal
-  name: '@deepseek-ai/dsh-agent-preset'
-  config: { ... }
+- id: preset-standard        # 停用 shipped preset 声明
+  disabled: true
 - id: preset-ptc
+  disabled: true
 - id: preset-cordis
+  disabled: true
+- insert:                    # 每个 preset 用一个很小的 filter 行替代
+    - id: preset-standard-filter
+      name: '@yankeguo/dsh-disable-goal-bundle/preset-filter'
+      config: { preset: standard, remove: [command-goal, tool-goal] }
+    # ... ptc / cordis
 ```
+
+`preset-filter` 在启动时通过 Loader 自己的模块解析读取**已安装的** shipped preset 声明
+（能读 `app.asar`，见 [`lib/preset-filter.js`](../packages/disable-goal-bundle/lib/preset-filter.js)），
+把 `command-goal` / `tool-goal` 过滤掉后，挂载真正的 `@deepseek-ai/dsh-agent-preset`。
+因此只禁用两个子项，preset 的其余内容仍来自 DSH 本身。
 
 包信息见 [`packages/disable-goal-bundle/README.md`](../packages/disable-goal-bundle/README.md)。
 
-## 维护：DSH 升级后重新生成
+## 维护：通常无需重新生成
 
-bundle 的 preset 覆盖是 DSH shipped preset 的**快照**（生成头里记录了 DSH 版本，当前
-`0.2.2-rc.1`）。DSH 升级后：
+动态 patch 不随 DSH 版本变化，**DSH 升级后不需要重新生成**。`scripts/build-disable-goal-bundle.mjs`
+仅用于重新生成/校验这个文件本身：
 
 ```sh
-cd /Users/guoyk/Workspace/src/github.com/yankeguo/dsh-infini-goal
-node scripts/build-disable-goal-bundle.mjs          # 重新生成 cordis.patch.yml
-node scripts/build-disable-goal-bundle.mjs --check  # 发布前/CI 检查是否过期
+node scripts/build-disable-goal-bundle.mjs          # 重新生成（默认动态版本）
+node scripts/build-disable-goal-bundle.mjs --check  # CI / 发布前检查是否最新
 ```
 
-脚本用 Electron 自带 Node 读 app.asar（`ELECTRON_RUN_AS_NODE=1`），无需解包、无额外依赖；
-preset 文件改名时会报错退出而不是写坏 patch。生成后按 semver 升 patch 版本发布即可，
-插件市场/Plugins 页会提示更新。
+如果未来 DSH 改动了 Loader 模块解析或 preset 文件布局，导致 filter 失效，可用快照回退：
+
+```sh
+node scripts/build-disable-goal-bundle.mjs --static   # 从已安装 app.asar 生成完整快照
+```
+
+`--static` 会复制 shipped 子列表，之后 DSH 升级需要重新生成。
 
 ## 注意事项
 
-- bundle 会冻结 `standard` / `ptc` / `cordis` 的子插件列表：DSH 升级后新增的 shipped
-  插件不会自动出现在这些 preset 里，直到重新生成。`minimal` preset 没有 goal 行，
-  不需要覆盖。
+- 动态 filter 依赖 Loader 的模块解析与 shipped preset 文件布局；DSH 大版本升级后建议先跑
+  一次隔离验证，必要时用 `--static` 回退。`minimal` preset 没有 goal 行，不需要替换。
 - 已有官方 goal 会变成惰性状态（服务在、driver/工具/UI 不在）。需要清理时先禁用本
   bundle、用 `/goal clear` 清空，再重新启用。
-- `goal` 服务仍挂载；如果未来 DSH 改变 preset 布局（比如把 goal 移到独立 plugin group），
-  重新生成脚本会感知到并更新覆盖方式。
+- `goal` 服务仍挂载（preset 激活需要它）。如果未来 DSH 把 goal 从 preset 中移走，
+  这个 bundle 自然变成 no-op（filter 只是原样挂载 preset），可以直接禁用。

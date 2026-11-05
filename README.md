@@ -195,6 +195,8 @@ pnpm install:profile --disable-builtin-goal                          # 本地 ch
 ```
 
 随后在 **Plugins** 页面勾选/取消该 bundle 即可实时开关官方 goal 模式。
+该 bundle **不复制 preset 内容**：它停用 shipped preset 声明，并用一个很小的运行时
+filter 读取已安装 preset、只过滤掉 `command-goal` / `tool-goal`，因此 DSH 升级后无需重新生成。
 原理（为什么不能直接禁 `goal` 服务、preset patch 粒度等）、生效时机（preset 变更只影响
 新 Agent，建议重启一次 DSH）、脚本方式与升级后维护见
 [`docs/DISABLE-BUILTIN-GOAL.md`](docs/DISABLE-BUILTIN-GOAL.md)。
