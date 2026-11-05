@@ -1,7 +1,7 @@
 {
   "name": "@yankeguo/dsh-infini-goal-bundle",
   "version": "0.1.0",
-  "description": "Endless goal mode for DeepSeek Harness: no round cap, a minimum trigger interval, and quiet time windows where the goal waits for assigned work.",
+  "description": "Endless goal mode for DeepSeek Harness: no round cap, a minimum trigger interval, and quiet time windows that suppress automatic rounds.",
   "license": "MIT",
   "type": "module",
   "icon": "./icon.svg",

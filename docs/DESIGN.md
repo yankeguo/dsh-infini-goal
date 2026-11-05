@@ -1,7 +1,7 @@
 # dsh-infini-goal 设计说明
 
 一套 DeepSeek Harness（DSH）插件，参考官方 `dsh-goal` 的领域模型、模型工具与 UI 形态，
-但把"自动续跑"改造成**无限轮次 + 最小触发间隔 + 静默时段**的员工式目标。
+但把"自动续跑"改造成一个**无轮次上限 + 最小触发间隔 + 可配置静默时段**的无限目标。
 
 ## 1. 与官方 dsh-goal 的差异
 
@@ -9,15 +9,16 @@
 | --- | --- | --- |
 | 轮次上限 | `maxGoalRounds`（默认 256），用尽后 `resume` 被拒绝 | **无上限**，目标保持 `active` 直到被 pause / block / complete / clear |
 | 续跑节流 | 无：一旦 agent 空闲立即进入下一轮，空循环会疯狂重试 | **最小触发间隔** `minIntervalMs`：两次自动轮次的开始时间至少相隔这么久 |
-| 触发时段 | 无 | **静默时段** `quietWindows`：配置的本地时间段内绝不自动触发（模拟上班时间等待派活） |
+| 触发时段 | 无 | **静默时段** `quietWindows`：配置的本地时间段内不自动触发（免打扰、专注时段、非工作时段、夜间等任意场景） |
 | 激活模型 | 进程内 `armed`/`disarmed`，session 恢复/派生后自动解除武装 | 纯持久化：`phase === 'active'` 即自动续跑（进程重启、会话恢复后继续），节流与静默时段兜底 |
 | 远程 API | Typert Remote（`ctx.remote.goals`） | 不需要自定义 Remote：UI 读 Session projection，操作通过 `/infini-goal` 命令 |
 | 工具 | `get_goal` / `create_goal` / `update_goal` | `get_infini_goal` / `create_infini_goal` / `update_infini_goal` |
 | 命令 | `/goal` | `/infini-goal` |
 
-"上班员工"语义：把 `quietWindows` 设为工作时间（例如 `Mo-Fr 09:00-18:00`）。
-在该时段内目标保持 `active`，人类的普通对话、工具调用照常工作，但插件不会自动
-注入新一轮续跑消息——它像员工一样等待被分配任务；时段结束后才继续自主推进。
+静默时段只约束"自动触发"：在该时段内目标保持 `active`，人类的普通对话、工具调用照常工作，
+但插件不会自动注入新一轮续跑消息；时段结束后按节奏继续推进。
+这是一种通用机制，具体怎么用由使用者决定，例如：免打扰时段、专注工作时段、非工作时间、
+夜间、值班交接时间等。
 
 ## 2. 包结构
 
@@ -177,7 +178,7 @@ Round prompt（模型可见）：`<infini_goal_round>` 块，包含 objective、
 ## 7. 模型工具（`tool` 包）
 
 `inject = ['agents', 'infiniGoals', 'tools', 'systemPrompt']`，注册 system prompt section
-`tool:infini-goal`（解释无限续跑、最小间隔、静默时段"等待派活"语义、完成/阻塞纪律）。
+`tool:infini-goal`（解释无限续跑、最小间隔、静默时段对自动触发的抑制、完成/阻塞纪律）。
 
 - `get_infini_goal`：无参数，返回 `{ goal: null }` 或 `{ goal: {id, revision, objective, phase,
   roundsStarted, lastRoundAt, minIntervalMs, quietWindows, timezone, blockedReason?},
@@ -223,7 +224,7 @@ Round prompt（模型可见）：`<infini_goal_round>` 块，包含 objective、
 - 展示：
   - 无目标 / complete → 不渲染；
   - active：图标 + "自动推进中" + objective + 轮次 + "下一轮 00:42"；
-    静默时段内显示 "等待分配任务 · 至 18:00"；间隔等待显示 "最小间隔 01:00"；
+    静默时段内显示 "静默时段 · 至 18:00"；间隔等待显示 "最小间隔 01:00"；
   - paused / blocked：状态标签 + reason，显示 resume 按钮；
   - 操作按钮：pause / resume / clear（全部通过 `executeCommand('/infini-goal pause')` 等命令执行，
     UI 不实现自己的 Remote API）。
@@ -264,7 +265,7 @@ Round prompt（模型可见）：`<infini_goal_round>` 块，包含 objective、
   3. paused：等待 5s 无新轮次；
   4. 浏览器 boot graph 含 `@yankeguo/dsh-client-ui-infini-goal`，client bundle HTTP 200 可服务；
   5. 真实浏览器验证：`/infini-goal` 命令创建目标后状态条出现（active/轮次/最小间隔），
-     pause/resume/quiet 命令生效，静默时段显示"等待分配任务 · 至 18:00"；
+     pause/resume/quiet 命令生效，静默时段显示"静默时段 · 至 18:00"；
   6. `scripts/install-profile.mjs` 安装模式（profile bundle + node_modules 链接，非 --patch）
      同样能加载全部插件、命令与 UI。
 - 截图见 `docs/screenshots/`。
@@ -284,5 +285,5 @@ Round prompt（模型可见）：`<infini_goal_round>` 块，包含 objective、
   由驱动器改写成持久化 pause，因此 UI 永远能看到可 resume 的状态。
 - **UI**：v1 不含 objective 内联编辑（命令 `edit` 覆盖），按钮只做 pause/resume/clear；
   等待最小间隔时状态条显示 `最小间隔 1m`（来自 `planTrigger.reason='interval'`），
-  静默时段显示 `等待分配任务 · 至 HH:mm`。
+  静默时段显示 `静默时段 · 至 HH:mm`。
 - **命令**：`/infini-goal status` 为无参数形式的显式别名；命令不接受附件（返回友好错误）。

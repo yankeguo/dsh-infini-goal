@@ -522,7 +522,7 @@ class="infini-goal-schedule" title="none · Asia/Shanghai" aria-live="off">
 
 The schedule line follows the goal state: `最小间隔 1m` while the minimum
 interval is pending, `下一轮 mm:ss` for the live countdown, and
-`等待分配任务 · 至 HH:mm` inside a quiet window.
+`静默时段 · 至 HH:mm` inside a quiet window.
 
 4. **Click the bar's pause button** (`button[aria-label="暂停目标"]`, en
    `"Pause goal"`; the clear button is `aria-label="清除目标"`). Assert both the

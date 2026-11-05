@@ -4,7 +4,7 @@
  *
  * The tools mirror the official `tool-goal` surface, extended with the pacing
  * configuration the infini-goal domain owns: a minimum trigger interval and
- * local-time quiet windows ("waiting for assigned work") instead of a round cap.
+ * local-time quiet windows (automatic-round suppression) instead of a round cap.
  *
  * @module @yankeguo/dsh-tool-infini-goal
  */
@@ -79,9 +79,9 @@ function guidance(blockedAfter: number): string {
     + 'no round cap: while its phase is active the harness keeps starting automatic continuation rounds until it '
     + 'is paused, blocked, completed, or cleared. Two pacing rules shape that autonomy: automatic rounds are spaced '
     + 'by a minimum trigger interval, and no automatic round starts inside the configured local-time quiet windows. '
-    + 'A quiet window is the "employee at work, waiting for assigned work" period: the goal stays active, human '
-    + 'turns and tools run normally, and the model simply does not self-start another round; never treat that '
-    + 'silence as failure or as a blocker. '
+    + 'A quiet window is a configured local-time period in which the goal stays active, human turns and tools run '
+    + 'normally, and the model simply does not self-start another round; never treat that silence as failure or '
+    + 'as a blocker. '
     + 'create_infini_goal may infer goal intent from a direct human request in any language. '
     + 'update_infini_goal action edit, pause, resume, and config require a direct human request. '
     + 'complete and blocked are also allowed during an exact automatic round of the current goal. '
@@ -190,7 +190,7 @@ export function apply(ctx: Context, config: Config): void {
       },
       quiet_windows: {
         type: 'string',
-        description: 'Optional local-time windows where the goal waits for assigned work instead of starting rounds, '
+        description: 'Optional local-time windows where no automatic round starts (the goal stays active and human turns continue), '
           + 'such as "Mo-Fr 09:00-18:00" or "Mo-Fr 09:00-18:00; Sa,Su 10:00-12:00"; "none" disables them.',
       },
       timezone: {

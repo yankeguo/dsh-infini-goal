@@ -6,8 +6,7 @@
  * protocol package: the next round may start no earlier than
  * `lastRoundAt + minIntervalMs`, and never inside a configured quiet window.
  * While a quiet window is active the goal stays `active` and human turns keep
- * working normally, but no automatic round is injected — the goal waits for
- * assigned work, like an employee on the clock.
+ * working normally, but no automatic round is injected until the window ends.
  *
  * @module @yankeguo/dsh-infini-goal-driver
  */

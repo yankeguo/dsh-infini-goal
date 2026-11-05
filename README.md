@@ -2,12 +2,12 @@
 
 一套面向 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）的插件：
 参考官方 `dsh-goal` 的领域模型、模型工具与 UI 形态，但把"自动续跑"改造成一个
-**无限轮次的员工式目标**。
+**无轮次上限、按最小间隔推进、可配置静默时段**的无限目标。
 
 - **没有最大轮次**：目标保持 `active` 直到被完成、暂停、阻塞或清除；
 - **最小触发间隔**：两次自动轮次的开始时间至少相隔 `minIntervalMs`，空循环不会疯狂重试；
-- **静默时段**（`quietWindows`）：配置的本地时间段内绝不自动触发，模拟员工上班时间
-  "等着被分配任务"；人类对话与工具调用照常工作，时段结束后自动继续。
+- **静默时段**（`quietWindows`）：配置的本地时间段内不自动触发；人类对话与工具调用照常工作，
+  时段结束后自动继续。可用于免打扰、专注时段、非工作时段、夜间等任意场景。
 
 ## 特性
 
@@ -20,15 +20,15 @@
 | Session projection | `infiniGoal` projection 把当前目标同步到浏览器，UI 无需自定义 Remote API |
 | 模型工具 | `get_infini_goal` / `create_infini_goal` / `update_infini_goal` |
 | 人类命令 | `/infini-goal`，可在不消耗模型轮次的情况下查看状态、配置节奏、暂停/恢复 |
-| 状态条 UI | composer 上方的 InfiniGoalBar：阶段、轮次、下一轮倒计时、静默等待提示、暂停/恢复/清除 |
+| 状态条 UI | composer 上方的 InfiniGoalBar：阶段、轮次、触发节奏、静默时段提示、暂停/恢复/清除 |
 
 ## 界面
 
 状态条固定在 composer 上方，与官方 goal 的 GoalBar 同槽位（`conversation.input.dock`）：
 
-| 自动推进中（显示轮次与节奏） | 静默时段（上班等待派活） |
+| 自动推进中（显示轮次与节奏） | 静默时段（不自动触发） |
 | --- | --- |
-| ![自动推进中](docs/screenshots/infini-goal-active.jpg) | ![等待分配任务](docs/screenshots/infini-goal-waiting.jpg) |
+| ![自动推进中](docs/screenshots/infini-goal-active.jpg) | ![静默时段](docs/screenshots/infini-goal-waiting.jpg) |
 
 ## 与官方 dsh-goal 的差异
 
@@ -91,7 +91,7 @@ node scripts/install-profile.mjs --profile desktop --dsh-home ~/.dsh
 /infini-goal 修完所有 failed 的文档校验并保持 CI 绿色   # 创建目标
 /infini-goal                                          # 查看状态与下一次触发时间
 /infini-goal interval 10m                             # 最小触发间隔改成 10 分钟
-/infini-goal quiet "Mo-Fr 09:00-18:00"                # 工作时间不自动触发（等待派活）
+/infini-goal quiet "Mo-Fr 09:00-18:00"                # 示例：该时段不自动触发
 /infini-goal quiet none                               # 取消静默时段
 /infini-goal timezone Asia/Shanghai                   # 设置静默时段时区（system 用本机时区）
 /infini-goal pause | resume | complete | clear

@@ -38,9 +38,11 @@ export interface InfiniGoalBlockReason {
 /**
  * One local-time window in which no automatic round may start.
  *
- * This is the "employee is at work and waits for assigned tasks" period: the
- * durable goal stays active, human turns and tools keep working normally, but
- * the driver never injects a self-started continuation round inside the window.
+ * Inside the window the durable goal stays active, human turns and tools keep
+ * working normally, but the driver never injects a self-started continuation
+ * round. The configuration is application-agnostic: any period during which
+ * automatic continuation should stay quiet (off-hours, focus time, night
+ * hours, business hours, and so on).
  */
 export interface QuietWindow {
   /** ISO weekday numbers the window starts on (1 = Monday … 7 = Sunday); empty means every day. */

@@ -6,14 +6,14 @@
  */
 export const zh = {
   'meta.title': '无限目标',
-  'meta.description': '在输入框上方展示无限续跑目标的阶段、轮次与下一次触发倒计时。',
+  'meta.description': '在输入框上方展示无限续跑目标的阶段、轮次、触发节奏与静默时段状态。',
   'phase.active': '自动推进中',
   'phase.paused': '已暂停',
   'phase.blocked': '已阻塞',
   'phase.complete': '已完成',
   'rounds': '轮次 {count}',
   'nextRoundIn': '下一轮 {time}',
-  'waitingUntil': '等待分配任务 · 至 {time}',
+  'waitingUntil': '静默时段 · 至 {time}',
   'minInterval': '最小间隔 {interval}',
   'objective.aria': '目标内容',
   'action.pause': '暂停目标',
@@ -29,14 +29,14 @@ export type InfiniGoalKey = keyof typeof zh
 /** English dictionary, checked complete against the zh key set. */
 export const en = {
   'meta.title': 'Infini Goal',
-  'meta.description': 'Shows the endless goal phase, rounds, and next-trigger countdown above the composer.',
+  'meta.description': 'Shows the endless goal phase, rounds, trigger pacing, and quiet-window state above the composer.',
   'phase.active': 'Auto-continuing',
   'phase.paused': 'Paused',
   'phase.blocked': 'Blocked',
   'phase.complete': 'Complete',
   'rounds': 'Rounds: {count}',
   'nextRoundIn': 'next round in {time}',
-  'waitingUntil': 'waiting for assigned work until {time}',
+  'waitingUntil': 'quiet window · until {time}',
   'minInterval': 'min interval {interval}',
   'objective.aria': 'Goal objective',
   'action.pause': 'Pause goal',

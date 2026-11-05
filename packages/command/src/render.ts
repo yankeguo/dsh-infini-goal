@@ -65,7 +65,7 @@ export function planLines(goal: InfiniGoalView, plan: TriggerPlan | undefined): 
   ]
   if (plan.quietUntil !== null) {
     lines.push(
-      `Waiting for assigned work until ${formatZonedDateTime(goal.timezone, plan.quietUntil)}`
+      `Automatic rounds are suppressed until ${formatZonedDateTime(goal.timezone, plan.quietUntil)}`
       + ` (quiet window; time zone ${goal.timezone}).`,
     )
   }

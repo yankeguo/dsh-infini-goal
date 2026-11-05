@@ -69,8 +69,8 @@ export function formatCountdown(delayMs: number): string {
  * Describe the live schedule line of an active goal at one instant.
  *
  * Precedence mirrors what the driver would do:
- * 1. inside a quiet window, the goal is waiting for assigned work until the
- *    window ends (`waitingUntil`, rendered in the goal's own time zone);
+ * 1. inside a quiet window, no automatic round starts until the window ends
+ *    (`waitingUntil`, rendered in the goal's own time zone);
  * 2. while the minimum interval has not elapsed, the configured interval is
  *    shown (`minInterval`);
  * 3. otherwise the remaining delay to the next eligible trigger is counted

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Endless goal continuation plugin suite for DeepSeek Harness: no round cap, a configurable minimum trigger interval, and quiet time windows where the goal waits for assigned work.",
+  "description": "Endless goal continuation plugin suite for DeepSeek Harness: no round cap, a configurable minimum trigger interval, and quiet time windows that suppress automatic rounds.",
   "license": "MIT",
   "engines": {
     "node": ">=24.9"

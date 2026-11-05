@@ -62,7 +62,7 @@ describe('planLines', () => {
     expect(planLines(current, plan)).toEqual(['Next trigger: 2026-11-05 10:00 (ready now)'])
   })
 
-  it('says the goal is waiting for assigned work inside a quiet window', () => {
+  it('says automatic rounds are suppressed inside a quiet window', () => {
     const current = goal({
       lastRoundAt: null,
       quietWindows: [{ days: [1, 2, 3, 4, 5], start: '09:00', end: '12:00' }],
@@ -72,7 +72,7 @@ describe('planLines', () => {
     expect(plan.quietUntil).toBe(Date.UTC(2026, 10, 5, 4, 0, 0))
     expect(planLines(current, plan)).toEqual([
       'Next trigger: 2026-11-05 12:00 (in 2h)',
-      'Waiting for assigned work until 2026-11-05 12:00 (quiet window; time zone Asia/Shanghai).',
+      'Automatic rounds are suppressed until 2026-11-05 12:00 (quiet window; time zone Asia/Shanghai).',
     ])
   })
 
@@ -156,7 +156,7 @@ describe('renderStatus', () => {
     })
     const result = renderStatus(current, planOf(current))
     expect(result.text).toContain(
-      'Waiting for assigned work until 2026-11-05 12:00 (quiet window; time zone Asia/Shanghai).',
+      'Automatic rounds are suppressed until 2026-11-05 12:00 (quiet window; time zone Asia/Shanghai).',
     )
   })
 })

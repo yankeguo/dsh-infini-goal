@@ -1,24 +1,24 @@
 ---
-description: "Endless goal mode for DeepSeek Harness: no round cap, a configurable minimum trigger interval, and quiet time windows where the goal waits for assigned work."
+description: "Endless goal mode for DeepSeek Harness: no round cap, a configurable minimum trigger interval, and quiet time windows that suppress automatic rounds."
 kind: "package-bundle"
 ---
 
 # @yankeguo/dsh-infini-goal-bundle
 
 参考官方 `dsh-goal` 的领域模型、模型工具与 UI 形态，但把"自动续跑"改造成一个
-**无限轮次的员工式目标**的 DSH 插件套件。
+**无轮次上限、按最小间隔推进、可配置静默时段**的无限目标的 DSH 插件套件。
 
 ## 特性
 
 - **无限轮次**：没有 `maxGoalRounds`，目标保持 `active` 直到被 pause / block / complete / clear。
 - **最小触发间隔**：两次自动轮次的开始时间至少相隔 `minIntervalMs`（默认 1 分钟，最小 1 秒），
   空循环不会出现"秒回秒触发"。
-- **静默时段**：配置本地时间段（支持跨午夜、按星期过滤、IANA 时区），时段内绝不自动触发；
-  人类对话、工具调用照常工作，时段结束后自动继续——像上班的员工在等待被分配任务。
+- **静默时段**：配置本地时间段（支持跨午夜、按星期过滤、IANA 时区），时段内不自动触发；
+  人类对话、工具调用照常工作，时段结束后自动继续。可用于免打扰、专注时段、非工作时段、夜间等任意场景。
 - **事件溯源**：所有变更写入 Session 日志（`infini-goal/change`），严格回放校验，可跨重启/恢复/fork。
 - **模型工具**：`get_infini_goal` / `create_infini_goal` / `update_infini_goal`。
 - **人类命令**：`/infini-goal`（状态、创建、编辑、暂停、恢复、完成、阻塞、清除、interval/quiet/timezone）。
-- **状态条 UI**：composer 上方显示阶段、轮次、下一轮倒计时、静默等待提示，以及暂停/恢复/清除按钮。
+- **状态条 UI**：composer 上方显示阶段、轮次、触发节奏、静默时段提示，以及暂停/恢复/清除按钮。
 
 ## 本 bundle 包含的插件行
 
@@ -80,7 +80,7 @@ dsh web --patch .tmp/cordis.patch.yml --port 34000 --no-open
 /infini-goal <目标>                     # 创建
 /infini-goal                            # 状态 + 下一次触发时间
 /infini-goal interval 10m               # 最小触发间隔
-/infini-goal quiet "Mo-Fr 09:00-18:00"  # 工作时间静默（等待派活）
+/infini-goal quiet "Mo-Fr 09:00-18:00"  # 示例：该时段静默
 /infini-goal quiet none                 # 取消静默
 /infini-goal timezone Asia/Shanghai
 /infini-goal edit <新目标>

@@ -4,8 +4,8 @@
  *
  * A present goal shows a goal glyph, its localized phase label, the truncated
  * objective, the admitted-round count, and one live schedule line:
- * - active inside a quiet window → "waiting for assigned work until HH:mm"
- *   (the employee-waits-for-assignment semantics);
+ * - active inside a quiet window → "quiet window · until HH:mm" (automatic
+ *   rounds are suppressed until the window ends);
  * - active while the minimum interval has not elapsed → "min interval 05:00";
  * - active otherwise → "next round in mm:ss", ticking once per second.
  *
