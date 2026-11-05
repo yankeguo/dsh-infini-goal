@@ -14,6 +14,7 @@ import type {
   TriggerPlan,
 } from '@yankeguo/dsh-infini-goal-protocol'
 import { apply } from '../src/index.ts'
+import type { Config } from '../src/index.ts'
 
 const NOW = Date.now()
 
@@ -143,7 +144,7 @@ interface Harness {
 }
 
 /** Boot the tool plugin against stub services with an empty session history. */
-function boot(): Harness {
+function boot(config: Config = {}): Harness {
   const goals = new FakeInfiniGoals()
   const definitions = new Map<string, CapturedTool>()
   const deferred: { source?: { kind: string; form?: string; summary?: string } }[] = []
@@ -172,7 +173,7 @@ function boot(): Harness {
       },
     },
   } as unknown as Context
-  apply(ctx, {})
+  apply(ctx, config)
   const exec = {
     agent,
     deferContext: (message: { source?: { kind: string; form?: string; summary?: string } }) => {
@@ -247,6 +248,11 @@ describe('infini-goal tool registration', () => {
       { goal_id: 'goal-1', revision: 1, action: 'pause' },
     )).toMatchObject({ card: 'generic', title: 'Pause infini-goal' })
   })
+
+  it('rejects an invalid blocked threshold before registering anything', () => {
+    expect(() => boot({ blockedAfterConsecutiveRounds: 0 })).toThrow(/positive safe integer/)
+    expect(() => boot({ blockedAfterConsecutiveRounds: 1.5 })).toThrow(/positive safe integer/)
+  })
 })
 
 describe('get_infini_goal', () => {
@@ -267,6 +273,41 @@ describe('get_infini_goal', () => {
     expect(value.schedule).not.toBeNull()
     expect(value.schedule?.nextTriggerInMs).toBe(0)
     expect(value.schedule?.quietUntil).toBeNull()
+  })
+
+  it('reports an interval wait and a quiet-window deferral in the schedule facts', async () => {
+    const harness = boot()
+    humanTurn(harness)
+    await harness.call('create_infini_goal', { objective: 'Ship the docs', timezone: 'UTC' })
+    if (harness.goals.goal === undefined) throw new Error('expected a goal')
+
+    // Minimum interval binds: the next round is one minute after the last one.
+    harness.goals.goal = {
+      ...harness.goals.goal,
+      lastRoundAt: Date.now() - 60_000,
+      minIntervalMs: 300_000,
+    }
+    const intervalWait = valueOf(await harness.call('get_infini_goal', {}))
+    expect(intervalWait.schedule?.quietUntil).toBeNull()
+    expect(intervalWait.schedule?.nextTriggerInMs).toBeGreaterThan(180_000)
+    const reference = (intervalWait.schedule?.nextTriggerAt ?? 0) - (intervalWait.schedule?.nextTriggerInMs ?? 0)
+    expect(Math.abs(reference - Date.now())).toBeLessThan(5_000)
+
+    // Quiet window binds: a window around the current UTC hour defers the round
+    // to the window end, which the schedule reports as both next trigger and
+    // quiet-until (the contract the tool documents).
+    const now = new Date()
+    const start = `${String(now.getUTCHours()).padStart(2, '0')}:00`
+    const end = `${String((now.getUTCHours() + 2) % 24).padStart(2, '0')}:00`
+    harness.goals.goal = {
+      ...harness.goals.goal,
+      quietWindows: [{ days: [], start, end }],
+      lastRoundAt: null,
+    }
+    const quietWait = valueOf(await harness.call('get_infini_goal', {}))
+    expect(quietWait.schedule?.quietUntil).not.toBeNull()
+    expect(quietWait.schedule?.quietUntil).toBe(quietWait.schedule?.nextTriggerAt)
+    expect(quietWait.schedule?.nextTriggerInMs).toBeGreaterThan(0)
   })
 })
 
@@ -303,6 +344,17 @@ describe('create_infini_goal', () => {
       .rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_INVALID_ARGUMENT' })
     await expect(harness.call('create_infini_goal', { objective: 'x', timezone: 'Mars/Olympus' }))
       .rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_INVALID_ARGUMENT' })
+  })
+
+  it('replaces a completed goal with a new active goal', async () => {
+    const harness = boot()
+    humanTurn(harness)
+    await harness.call('create_infini_goal', { objective: 'Ship the docs' })
+    humanTurn(harness)
+    await harness.call('update_infini_goal', { goal_id: 'goal-1', revision: 1, action: 'complete' })
+    humanTurn(harness)
+    const replaced = valueOf(await harness.call('create_infini_goal', { objective: 'Ship v2' }))
+    expect(replaced.goal).toMatchObject({ objective: 'Ship v2', phase: 'active', revision: 1 })
   })
 })
 
@@ -480,6 +532,64 @@ describe('update_infini_goal', () => {
     expect(harness.deferred).toHaveLength(0)
   })
 
+  it('enforces a configured block threshold only for goal-round authority', async () => {
+    const harness = boot({ blockedAfterConsecutiveRounds: 9 })
+    humanTurn(harness)
+    const created = valueOf(await harness.call('create_infini_goal', { objective: 'Ship the docs' }))
+    const goal = created.goal
+    if (goal === null) throw new Error('expected a goal')
+    if (harness.goals.goal === undefined) throw new Error('expected a goal')
+    harness.goals.goal = { ...harness.goals.goal, roundsStarted: 3 }
+    goalRoundTurn(harness)
+    await expect(harness.call('update_infini_goal', {
+      goal_id: goal.id,
+      revision: goal.revision,
+      action: 'blocked',
+      blocked_reason: 'credentials expired',
+    })).rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_BLOCK_THRESHOLD' })
+    // The same low round count blocks fine when a direct human asks for it.
+    humanTurn(harness)
+    const blocked = valueOf(await harness.call('update_infini_goal', {
+      goal_id: goal.id,
+      revision: goal.revision,
+      action: 'blocked',
+      blocked_reason: 'credentials expired',
+    }))
+    expect(blocked.goal?.phase).toBe('blocked')
+  })
+
+  it('treats empty strings in unused fields as absent fillers', async () => {
+    const harness = boot()
+    humanTurn(harness)
+    const created = valueOf(await harness.call('create_infini_goal', { objective: 'Ship the docs' }))
+    const goal = created.goal
+    if (goal === null) throw new Error('expected a goal')
+    humanTurn(harness)
+    const edited = valueOf(await harness.call('update_infini_goal', {
+      goal_id: goal.id,
+      revision: goal.revision,
+      action: 'edit',
+      objective: '',
+      min_interval: '90s',
+      blocked_reason: '',
+    }))
+    expect(edited.goal?.objective).toBe('Ship the docs')
+    expect(edited.goal?.minIntervalMs).toBe(90_000)
+    if (edited.goal === null) throw new Error('expected a goal')
+    humanTurn(harness)
+    const paused = valueOf(await harness.call('update_infini_goal', {
+      goal_id: edited.goal.id,
+      revision: edited.goal.revision,
+      action: 'pause',
+      objective: '',
+      min_interval: '',
+      quiet_windows: '',
+      timezone: '',
+      blocked_reason: '',
+    }))
+    expect(paused.goal?.phase).toBe('paused')
+  })
+
   it('translates a stale revision into a structured tool error', async () => {
     const harness = boot()
     humanTurn(harness)
@@ -517,5 +627,19 @@ describe('tool error translation', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(HarnessError)
     }
+  })
+
+  it('surfaces not-found and already-exists domain failures as structured tool errors', async () => {
+    const harness = boot()
+    humanTurn(harness)
+    await expect(harness.call('update_infini_goal', {
+      goal_id: 'missing',
+      revision: 1,
+      action: 'pause',
+    })).rejects.toMatchObject({ code: 'INFINI_GOAL_NOT_FOUND' })
+    await harness.call('create_infini_goal', { objective: 'Ship the docs' })
+    humanTurn(harness)
+    await expect(harness.call('create_infini_goal', { objective: 'Another goal' }))
+      .rejects.toMatchObject({ code: 'INFINI_GOAL_ALREADY_EXISTS' })
   })
 })

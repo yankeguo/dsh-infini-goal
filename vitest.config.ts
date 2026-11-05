@@ -1,4 +1,8 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
+
+/** Resolve one workspace source file to an absolute path Vite can alias. */
+const source = (relative: string): string => fileURLToPath(new URL(relative, import.meta.url))
 
 export default defineConfig({
   test: {
@@ -7,9 +11,12 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@yankeguo/dsh-infini-goal-protocol/client': new URL('./packages/protocol/src/client.ts', import.meta.url).pathname,
-      '@yankeguo/dsh-infini-goal-protocol': new URL('./packages/protocol/src/index.ts', import.meta.url).pathname,
-      '@yankeguo/dsh-infini-goal': new URL('./packages/infini-goal/src/index.ts', import.meta.url).pathname,
+      // The subpath alias must precede its package alias: Vite applies the
+      // first matching entry, and a checkout path with spaces or non-ASCII
+      // characters must survive as a real path (URL.pathname would percent-encode it).
+      '@yankeguo/dsh-infini-goal-protocol/client': source('./packages/protocol/src/client.ts'),
+      '@yankeguo/dsh-infini-goal-protocol': source('./packages/protocol/src/index.ts'),
+      '@yankeguo/dsh-infini-goal': source('./packages/infini-goal/src/index.ts'),
     },
   },
 })

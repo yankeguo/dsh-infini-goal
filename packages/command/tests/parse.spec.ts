@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  COMMAND_GRAMMAR,
   CommandInputError,
   USAGE,
   parseInfiniGoalCommand,
@@ -36,6 +37,33 @@ describe('parseInfiniGoalCommand', () => {
     expect(parseInfiniGoalCommand('edit Ship v2')).toEqual({ kind: 'edit', objective: 'Ship v2' })
     expect(parseInfiniGoalCommand('EDIT   Ship v2  ')).toEqual({ kind: 'edit', objective: 'Ship v2' })
     expect(parseInfiniGoalCommand('edit the docs')).toEqual({ kind: 'edit', objective: 'the docs' })
+  })
+
+  it('strips one surrounding quote pair from every argument value', () => {
+    // The README itself shows quoted quiet-window text, so quotes are grammar.
+    expect(parseInfiniGoalCommand('quiet "Mo-Fr 09:00-18:00"'))
+      .toEqual({ kind: 'quiet', windows: 'Mo-Fr 09:00-18:00' })
+    expect(parseInfiniGoalCommand("quiet 'none'")).toEqual({ kind: 'quiet', windows: 'none' })
+    expect(parseInfiniGoalCommand('interval "5m"')).toEqual({ kind: 'interval', duration: '5m' })
+    expect(parseInfiniGoalCommand('timezone "UTC"')).toEqual({ kind: 'timezone', timezone: 'UTC' })
+    expect(parseInfiniGoalCommand('edit "Ship v2"')).toEqual({ kind: 'edit', objective: 'Ship v2' })
+    expect(parseInfiniGoalCommand("block 'waiting on credentials'"))
+      .toEqual({ kind: 'block', message: 'waiting on credentials' })
+    expect(parseInfiniGoalCommand('"Ship the docs"')).toEqual({ kind: 'create', objective: 'Ship the docs' })
+  })
+
+  it('keeps quoted control words as objectives rather than controls', () => {
+    expect(parseInfiniGoalCommand('"pause"')).toEqual({ kind: 'create', objective: 'pause' })
+    expect(parseInfiniGoalCommand("'clear'")).toEqual({ kind: 'create', objective: 'clear' })
+  })
+
+  it('rejects known subcommands whose quoted argument is empty', () => {
+    expect(parseInfiniGoalCommand('edit ""')).toMatchObject({ kind: 'invalid' })
+    expect(parseInfiniGoalCommand("block ''")).toMatchObject({ kind: 'invalid' })
+    expect(parseInfiniGoalCommand('interval ""')).toMatchObject({ kind: 'invalid' })
+    expect(parseInfiniGoalCommand('quiet ""')).toMatchObject({ kind: 'invalid' })
+    expect(parseInfiniGoalCommand('timezone ""')).toMatchObject({ kind: 'invalid' })
+    expect(parseInfiniGoalCommand('""')).toMatchObject({ kind: 'invalid' })
   })
 
   it('rejects edit without an objective', () => {
@@ -77,9 +105,10 @@ describe('parseInfiniGoalCommand', () => {
       .toEqual({ kind: 'create', objective: 'clear the cache' })
   })
 
-  it('exposes one stable usage line', () => {
+  it('exposes one stable usage line and its advertised grammar', () => {
     expect(USAGE).toContain('/infini-goal [<objective>')
     expect(USAGE).toContain('interval <duration>')
+    expect(USAGE).toBe(`Usage: /infini-goal ${COMMAND_GRAMMAR}`)
   })
 })
 

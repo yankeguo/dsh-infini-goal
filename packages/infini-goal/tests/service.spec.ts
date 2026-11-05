@@ -11,11 +11,18 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentRegistry } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId, SessionLogOffset, appendPluginRecord, pluginRecordOf } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import type { InfiniGoalView } from '@yankeguo/dsh-infini-goal-protocol'
-import { InfiniGoalError, InfiniGoalService } from '../src/index.ts'
+import type { InfiniGoalOperation, InfiniGoalView } from '@yankeguo/dsh-infini-goal-protocol'
+import {
+  INFINI_GOAL_RECORD_TYPE,
+  InfiniGoalError,
+  InfiniGoalService,
+  decodeInfiniGoalChange,
+  foldInfiniGoal,
+} from '../src/index.ts'
+import type { InfiniGoalChange } from '../src/domain.ts'
 
 /** One booted harness: registry, session, fake agent, and the loaded service. */
 interface Harness {
@@ -29,12 +36,13 @@ interface Harness {
 let sessionCounter = 0
 
 /** Boot cordis with the real services and load the infini-goal core plugin. */
-async function boot(config: Record<string, unknown> = {}): Promise<Harness> {
+async function boot(config: Record<string, unknown> = {}, seed?: readonly SessionEvent[]): Promise<Harness> {
   const ctx = new Context()
   await ctx.plugin(SessionStore)
   await ctx.plugin(SessionProjectionRegistry)
   sessionCounter += 1
-  const session = ctx.sessions.create(SessionId(`infini-goal-probe-${String(sessionCounter)}`))
+  const sessionId = SessionId(`infini-goal-probe-${String(sessionCounter)}`)
+  const session = seed === undefined ? ctx.sessions.create(sessionId) : ctx.sessions.create(sessionId, { seed })
   const agent = { id: session.id, session }
   const agents = {
     get: (id: typeof session.id) => (id === session.id ? agent : undefined),
@@ -201,5 +209,245 @@ describe('InfiniGoalService against a real session', () => {
     expect(second.createdAt).toBeGreaterThanOrEqual(completed.updatedAt)
     appendRound(agent.session, second, 1)
     expect(ctx.infiniGoals.get(agent)).toMatchObject({ roundsStarted: 1, revision: 1 })
+  })
+})
+
+describe('InfiniGoalService durable representation', () => {
+  /** Every committed infini-goal change record in one session log. */
+  function changeRecords(session: Session): SessionEvent[] {
+    return session.snapshotEvents().filter(event => pluginRecordOf(event)?.type === INFINI_GOAL_RECORD_TYPE)
+  }
+
+  it('writes durable changes as ignorable plugin records', async () => {
+    const { ctx, agent, session } = await boot()
+    const created = ctx.infiniGoals.create(agent, { objective: 'durable' })
+    const paused = ctx.infiniGoals.pause(agent, { id: created.id, revision: created.revision })
+    ctx.infiniGoals.clear(agent, { id: paused.id, revision: paused.revision })
+
+    const records = changeRecords(session)
+    expect(records).toHaveLength(3)
+    for (const event of records) {
+      // Persistence-compat invariant: the harness's stored-event validation
+      // accepts an unknown type only when the envelope carries this marker.
+      expect(event.ignorable).toBe(true)
+      expect(String(event.type)).toBe(INFINI_GOAL_RECORD_TYPE)
+      expect(pluginRecordOf(event)?.type).toBe(INFINI_GOAL_RECORD_TYPE)
+    }
+    const operations = records.map(event => decodeInfiniGoalChange(pluginRecordOf(event)?.data)?.operation)
+    expect(operations).toEqual(['create', 'pause', 'clear'] satisfies InfiniGoalOperation[])
+    // The retired required event type is never appended.
+    expect(session.snapshotEvents().some(event => String(event.type) === 'infini-goal/change')).toBe(false)
+    // The durable stream still folds to the live state.
+    expect(foldInfiniGoal(session.snapshotEvents())).toMatchObject({
+      roundsStarted: 0,
+      lastRoundAt: null,
+      lastRef: { id: created.id, revision: 3 },
+    })
+  })
+
+  it('captures corruption in a plugin record while the client view stays at the last valid goal', async () => {
+    const { ctx, agent, session } = await boot()
+    ctx.infiniGoals.create(agent, { objective: 'poisoned record' })
+    const lastValid = ctx.sessionProjections.snapshot(session, ['infiniGoal']).values['infiniGoal']
+    appendPluginRecord(session, INFINI_GOAL_RECORD_TYPE, { kind: 'not-a-change' } as unknown as InfiniGoalChange)
+    expect(ctx.sessionProjections.snapshot(session, ['infiniGoal']).values['infiniGoal']).toEqual(lastValid)
+    expect(() => ctx.infiniGoals.get(agent)).toThrow(/infini-goal replay failed at session event \d+: infini-goal change at session event \d+ has an invalid kind/)
+  })
+
+  it('replays the whole goal from a restored session log', async () => {
+    const { ctx, agent, session } = await boot()
+    const created = ctx.infiniGoals.create(agent, { objective: 'resume me' })
+    appendRound(session, created, 1)
+    const afterRound = ctx.infiniGoals.get(agent) as InfiniGoalView
+    const edited = ctx.infiniGoals.edit(agent, { id: afterRound.id, revision: afterRound.revision }, {
+      objective: 'resumed objective',
+      minIntervalMs: 9_000,
+    })
+    const stored = session.snapshotEvents()
+
+    // A fresh harness over a Session seeded with the stored log is the same
+    // replay path a resumed Session takes: the projection folds every record.
+    const resumed = await boot({ defaultMinIntervalMs: 1_000 }, stored)
+    expect(ctx.infiniGoals.get(agent)).toMatchObject({
+      id: edited.id,
+      revision: edited.revision,
+      phase: 'active',
+      objective: 'resumed objective',
+      minIntervalMs: 9_000,
+      roundsStarted: 1,
+      lastRoundAt: afterRound.lastRoundAt,
+      createdAt: edited.createdAt,
+      updatedAt: edited.updatedAt,
+    })
+    expect(resumed.ctx.infiniGoals.get(resumed.agent)).toEqual(ctx.infiniGoals.get(agent))
+    expect(foldInfiniGoal(resumed.session.snapshotEvents())).toEqual(foldInfiniGoal(stored))
+    // A mutation after restore continues from the replayed revision.
+    const paused = resumed.ctx.infiniGoals.pause(resumed.agent, { id: edited.id, revision: edited.revision })
+    expect(paused).toMatchObject({ phase: 'paused', revision: edited.revision + 1, roundsStarted: 1 })
+  })
+
+  it('checkpoints and restores the projection state it produced', async () => {
+    const { ctx, agent, session } = await boot()
+    const created = ctx.infiniGoals.create(agent, { objective: 'checkpoint me' })
+    appendRound(session, created, 1)
+    const afterRound = ctx.infiniGoals.get(agent) as InfiniGoalView
+    const edited = ctx.infiniGoals.edit(agent, { id: afterRound.id, revision: afterRound.revision }, {
+      objective: 'checkpointed',
+      quietWindows: [{ days: [1, 2], start: '22:00', end: '06:00' }],
+    })
+    const blocked = ctx.infiniGoals.block(agent, { id: edited.id, revision: edited.revision }, {
+      code: 'max-tokens',
+      message: 'budget exhausted',
+    })
+    ctx.infiniGoals.resume(agent, { id: blocked.id, revision: blocked.revision })
+    const live = ctx.sessionProjections.snapshot(session, ['infiniGoal']).values['infiniGoal']
+    const checkpoint = ctx.sessionProjections.checkpoint(session)
+    // `restore` seeds from the checkpoint row through `stateSchema`, so this also
+    // guards that every state the fold produces passes its own persisted schema.
+    const restored = ctx.sessionProjections.restore(
+      checkpoint,
+      [...session.snapshotEvents()],
+      SessionLogOffset(0),
+      session.header,
+      session.inheritedEventCount,
+    )
+    expect(restored.snapshot.values['infiniGoal']).toEqual(live)
+    expect(restored.checkpoint['infiniGoal']?.val).toEqual(checkpoint['infiniGoal']?.val)
+  })
+
+  it('replays retired infini-goal/change events from a seeded session', async () => {
+    const { ctx, agent, session } = await boot()
+    const created = ctx.infiniGoals.create(agent, { objective: 'legacy continuity' })
+    const legacyEvents = session.snapshotEvents().map(event => (
+      pluginRecordOf(event)?.type === INFINI_GOAL_RECORD_TYPE
+        ? { ...event, type: 'infini-goal/change', data: pluginRecordOf(event)?.data } as unknown as SessionEvent
+        : event
+    ))
+    const resumed = await boot({}, legacyEvents)
+    expect(resumed.ctx.infiniGoals.get(resumed.agent)).toMatchObject({
+      id: created.id,
+      revision: created.revision,
+      objective: 'legacy continuity',
+      phase: 'active',
+    })
+  })
+})
+
+describe('InfiniGoalService mutation coverage', () => {
+  /** A quiet-window pair that leaves no triggerable local time. */
+  function allDayWindows(): Array<{ days: number[]; start: string; end: string }> {
+    return [
+      { days: [], start: '00:00', end: '12:00' },
+      { days: [], start: '12:00', end: '00:00' },
+    ]
+  }
+
+  it('edits objective and pacing settings through one revision', async () => {
+    const { ctx, agent, events } = await boot()
+    const created = ctx.infiniGoals.create(agent, { objective: 'edit me' })
+    appendRound(agent.session, created, 1)
+    const before = ctx.infiniGoals.get(agent) as InfiniGoalView
+    const edited = ctx.infiniGoals.edit(agent, { id: before.id, revision: before.revision }, {
+      objective: '  edited objective  ',
+      minIntervalMs: 9_000,
+      quietWindows: [{ days: [5, 1], start: '9:00', end: '18:00' }],
+      timezone: 'Asia/Tokyo',
+    })
+    expect(edited).toMatchObject({
+      id: before.id,
+      revision: 2,
+      objective: 'edited objective',
+      phase: 'active',
+      minIntervalMs: 9_000,
+      timezone: 'Asia/Tokyo',
+      roundsStarted: 1,
+      lastRoundAt: before.lastRoundAt,
+      createdAt: before.createdAt,
+    })
+    expect(edited.quietWindows).toEqual([{ days: [1, 5], start: '09:00', end: '18:00' }])
+    expect(edited.updatedAt).toBeGreaterThanOrEqual(before.updatedAt)
+    expect(events.map(change => change.operation)).toEqual(['create', 'edit'])
+    expect(ctx.infiniGoals.get(agent)).toEqual(edited)
+  })
+
+  it('rejects empty, malformed, stale, and unschedulable edits without changing the goal', async () => {
+    const { ctx, agent } = await boot()
+    const created = ctx.infiniGoals.create(agent, { objective: 'errors' })
+    const ref = { id: created.id, revision: created.revision }
+    expectCode(() => ctx.infiniGoals.edit(agent, ref, {}), 'INFINI_GOAL_INVALID_SETTINGS')
+    expectCode(() => ctx.infiniGoals.edit(agent, ref, { objective: '   ' }), 'INFINI_GOAL_INVALID_OBJECTIVE')
+    expectCode(() => ctx.infiniGoals.edit(agent, ref, { minIntervalMs: 5 }), 'INFINI_GOAL_INVALID_SETTINGS')
+    expectCode(() => ctx.infiniGoals.edit(agent, ref, { timezone: 'Nope/Nope' }), 'INFINI_GOAL_INVALID_SETTINGS')
+    expectCode(() => ctx.infiniGoals.edit(agent, ref, { quietWindows: allDayWindows() }), 'INFINI_GOAL_INVALID_SETTINGS')
+    expectCode(
+      () => ctx.infiniGoals.edit(agent, { id: created.id, revision: created.revision + 1 }, { objective: 'x' }),
+      'INFINI_GOAL_STALE_REVISION',
+    )
+    expect(ctx.infiniGoals.get(agent)).toMatchObject({ revision: 1, objective: 'errors' })
+  })
+
+  it('completes from the paused and blocked phases', async () => {
+    const paused = await boot()
+    const pausedCreated = paused.ctx.infiniGoals.create(paused.agent, { objective: 'paused complete' })
+    const pausedGoal = paused.ctx.infiniGoals.pause(paused.agent, {
+      id: pausedCreated.id,
+      revision: pausedCreated.revision,
+    })
+    expect(paused.ctx.infiniGoals.complete(paused.agent, {
+      id: pausedGoal.id,
+      revision: pausedGoal.revision,
+    })).toMatchObject({ phase: 'complete', revision: 3 })
+
+    const blocked = await boot()
+    const blockedCreated = blocked.ctx.infiniGoals.create(blocked.agent, { objective: 'blocked complete' })
+    const blockedGoal = blocked.ctx.infiniGoals.block(blocked.agent, {
+      id: blockedCreated.id,
+      revision: blockedCreated.revision,
+    }, { code: 'max-tokens', message: 'budget exhausted' })
+    const completed = blocked.ctx.infiniGoals.complete(blocked.agent, {
+      id: blockedGoal.id,
+      revision: blockedGoal.revision,
+    })
+    expect(completed).toMatchObject({ phase: 'complete', revision: 3 })
+    // Completion from blocked drops the durable reason.
+    expect('blockedReason' in completed).toBe(false)
+  })
+
+  it('clears with a tombstone, releases the slot, and starts a fresh goal', async () => {
+    const { ctx, agent } = await boot()
+    const first = ctx.infiniGoals.create(agent, { objective: 'first' })
+    appendRound(agent.session, first, 1)
+    const cleared = ctx.infiniGoals.clear(agent, { id: first.id, revision: first.revision })
+    expect(cleared).toEqual({ id: first.id, revision: 2 })
+    expect(ctx.infiniGoals.get(agent)).toBeUndefined()
+    expect(ctx.infiniGoals.plan(agent)).toBeUndefined()
+    expectCode(() => ctx.infiniGoals.clear(agent, cleared), 'INFINI_GOAL_NOT_FOUND')
+    expectCode(() => ctx.infiniGoals.pause(agent, { id: first.id, revision: 1 }), 'INFINI_GOAL_NOT_FOUND')
+    const second = ctx.infiniGoals.create(agent, { objective: 'second' })
+    expect(second.id).not.toBe(first.id)
+    expect(second).toMatchObject({ phase: 'active', revision: 1, roundsStarted: 0, lastRoundAt: null })
+    expectCode(
+      () => ctx.infiniGoals.clear(agent, { id: second.id, revision: second.revision + 1 }),
+      'INFINI_GOAL_STALE_REVISION',
+    )
+  })
+
+  it('rejects mutations from a non-live agent instance', async () => {
+    const { ctx, agent } = await boot()
+    const created = ctx.infiniGoals.create(agent, { objective: 'live' })
+    const ref = { id: created.id, revision: created.revision }
+    const impostor = { id: agent.id, session: agent.session } as unknown as Agent
+    expectCode(() => ctx.infiniGoals.create(impostor, { objective: 'x' }), 'INFINI_GOAL_AGENT_NOT_LIVE')
+    expectCode(() => ctx.infiniGoals.edit(impostor, ref, { objective: 'x' }), 'INFINI_GOAL_AGENT_NOT_LIVE')
+    expectCode(() => ctx.infiniGoals.pause(impostor, ref), 'INFINI_GOAL_AGENT_NOT_LIVE')
+    expectCode(() => ctx.infiniGoals.resume(impostor, ref), 'INFINI_GOAL_AGENT_NOT_LIVE')
+    expectCode(() => ctx.infiniGoals.complete(impostor, ref), 'INFINI_GOAL_AGENT_NOT_LIVE')
+    expectCode(() => ctx.infiniGoals.block(impostor, ref, { code: 'x', message: 'y' }), 'INFINI_GOAL_AGENT_NOT_LIVE')
+    expectCode(() => ctx.infiniGoals.clear(impostor, ref), 'INFINI_GOAL_AGENT_NOT_LIVE')
+    expectCode(() => ctx.infiniGoals.plan(impostor), 'INFINI_GOAL_AGENT_NOT_LIVE')
+  })
+
+  it('fails plugin construction when the deployment defaults can never trigger', async () => {
+    await expect(boot({ defaultQuietWindows: allDayWindows() })).rejects.toThrow(/cover every local time/)
   })
 })

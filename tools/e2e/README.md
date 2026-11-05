@@ -34,12 +34,15 @@ tools/e2e/
     └── e2e-control-plugin/       # suite run only: drives ctx.infiniGoals + ctx.agents over HTTP
 ```
 
+`tools/e2e/lib/` holds the shared shell/Node helpers; it is tracked in the repo
+(it used to be accidentally ignored by the root `lib/` gitignore rule).
+
 ## Prerequisites
 
 | Requirement | Notes |
 |---|---|
 | DeepSeek Harness **0.2.2-rc.1** desktop app installed | harness uses the packaged launcher `/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh` (override with `DSH_BIN`) |
-| Node.js **>= 20** on `PATH` | runs the harness scripts and mock LLM (override with `DSH_E2E_NODE`) |
+| Node.js **>= 24.9** on `PATH` | matches the repo `engines.node` (esbuild `target: node24`, SDK scripts); override with `DSH_E2E_NODE` |
 | `pnpm` + repo `node_modules` | `pnpm install` once; `suite.sh`/`probe-tools.sh` need `pnpm build` |
 | free TCP ports **>= 34000** | `DSH_E2E_WEB_PORT` (34000) and `DSH_E2E_LLM_PORT` (34100) |
 | no writes to `~/.dsh` | everything lives under `/tmp/dsh-e2e` (or `DSH_E2E_ROOT`) |
@@ -62,7 +65,7 @@ All scratch state goes to **`/tmp/dsh-e2e/`** by default:
 
 ```sh
 # 0. one-time: install repo dependencies (needed by plugin-bundle imports and by pnpm build)
-cd /Users/guoyk/Workspace/src/github.com/yankeguo/dsh-infini-goal
+cd /Users/guoyk/Workspace/src/dsh-infini-goal
 pnpm install
 
 # 1. harness self-test (fixture plugin by absolute path, deterministic mock LLM)
@@ -154,7 +157,9 @@ Ports below 34000 are refused outright.
 
 ### `suite.sh` (real plugin suite E2E)
 
-1. `pnpm build` — builds all five plugin bundles (`packages/*/lib/*.js`).
+1. `pnpm build` — builds the suite: 9 `lib/*.js` files across the plugin packages
+   (the main `bundle` package is patch-only and emits no JS; `disable-goal-bundle`
+   contributes its copied `preset-filter.js` runtime asset).
 2. `node scripts/dev-patch.mjs` — writes `.tmp/cordis.patch.yml` inserting the
    five plugin rows by absolute path.
 3. Isolated profile + **linked root** (`link-repo-root.sh`) so the bundles'
@@ -322,7 +327,7 @@ chain) unless the importer is inside an *interception layer*:
   checkout under the active profile's `node_modules`:
   ```sh
   mkdir -p /tmp/dsh-e2e/home/profiles/e2e/node_modules
-  ln -sfn /Users/guoyk/Workspace/src/github.com/yankeguo/dsh-infini-goal \
+  ln -sfn /Users/guoyk/Workspace/src/dsh-infini-goal \
            /tmp/dsh-e2e/home/profiles/e2e/node_modules/e2e-repo-root
   ```
   DSH then treats that directory as a **linked root**: importers below it use
@@ -375,7 +380,7 @@ Mock server surface (all on `127.0.0.1:<llm port>`):
 | `POST /v1/chat/completions` | OpenAI-compatible streaming completion |
 | `GET /v1/models` | OpenAI-shaped model list |
 | `GET /health` | `{ok, requests, remaining}` |
-| `GET /__mock/requests` | request log array (also appended to `logs/mock-llm-requests.jsonl`) |
+| `GET /__mock/requests` | `{"requests": [...]}` log array (also appended to `logs/mock-llm-requests.jsonl`; `fetchMockRequests` also accepts a bare array) |
 | `GET /__mock/scenario` | scenario + cursor |
 | `POST /__mock/reset` | reset cursor + request log |
 
@@ -423,20 +428,19 @@ is `infini-goal` (`{kind, goalId, revision, round}`), with epoch-ms `event.time`
    driver works), `pause`, then assert `phase === 'paused'` and the round count
    does not change for 5 s.
 
-Verified run (`suite.sh --fresh`, 2026-11-05, mock model, live plugin suite):
+Verified run (`suite.sh --fresh`, frozen tree, 2026-11-05, isolated
+`/tmp/dsh-e2e-final`, mock model, live plugin suite):
 
 ```
 PASS scenario1 automatic rounds respect minIntervalMs
-  roundStarts: [{"round":1,"at":"...T03:02:38.643Z","seq":9},
-                {"round":2,"at":"...T03:02:40.693Z","seq":22},
-                {"round":3,"at":"...T03:02:42.781Z","seq":31}]
-  gapsMs: [2050,2088]
+  roundStarts: [{"round":1,...,"seq":9},{"round":2,...,"seq":22},{"round":3,...,"seq":31}]
+  gapsMs: [2021,2011]
   roundsStarted: 3
-  plan: {"reason":"interval","delayMs":1788,...}
+  plan: {"reason":"interval",...}
 PASS scenario2 quiet window suppresses then releases rounds
-  window: {"start":"11:00","end":"11:03","timeZone":"Asia/Shanghai","quietUntil":"...T03:03:00.000Z"}
+  window: {"start":"16:44","end":"16:48","timeZone":"Asia/Shanghai",...}
   roundsDuringWindow: 0
-  firstRoundAfterQuiet: "...T03:03:00.251Z"   delayAfterQuietMs: 159
+  firstRoundAfterQuiet: ...   delayAfterQuietMs: 27
 PASS scenario3 paused goal produces no automatic rounds
   roundsBeforeWait: 1  roundsAfterWait: 1  view: {"phase":"paused","roundsStarted":1}
 SUITE SCENARIOS PASS
@@ -445,6 +449,29 @@ SUITE SCENARIOS PASS
 (Scenario 2 can take up to ~70 s by construction; scenarios 1+3 take ~15 s.)
 
 Suite artifacts: `/tmp/dsh-e2e/suite/{build.log,dev-patch.log,probe-web.log,scenarios.log}`.
+
+### Durability / resume / repair proof (frozen tree, manual)
+
+Beyond the scenario suite, the frozen build was verified against the real installed
+DSH 0.2.2-rc.1 persistence read path (isolated `/tmp/dsh-e2e-final`, ports 35100/35101):
+
+- All three suite-written Session logs pass the installed
+  `@deepseek-ai/dsh-session-persistence` `validateStoredEvents` (189 / 347 / 63 / 19
+  events; they contain ignorable `plugin:infini-goal/change` records and no legacy
+  `infini-goal/change` event type).
+- Restarting the same isolated instance and home: a paused goal Session reloads and
+  restores `{phase:"paused", revision:2, roundsStarted:1}`; an active goal Session
+  keeps running automatic rounds across the restart (`roundsStarted` 31 → 38).
+- A real 0.1.0 log (`~/.dsh/sessions/...superhive.../session.v4.jsonl.zstd`) is
+  refused by the installed validator at seq 544 ("unknown … not marked ignorable"),
+  which is the P0 the current representation fixes.
+- `scripts/repair-session-log.mjs` on that log: `--dry-run` reports 7 rows; the
+  `--write` output passes `validateStoredEvents`; re-running is idempotent; a
+  `session.lock` makes it refuse without `--force`.
+
+Reproduce by running `suite.sh --fresh` (its Sessions are written by the current
+representation), then inspect the isolated home and restart with
+`DSH_E2E_KEEP_RUNNING=1`.
 
 ---
 
@@ -505,15 +532,20 @@ Then with the Browser MCP tool:
 })()
 ```
 
-Verified (2026-11-05, isolated root `/tmp/dsh-e2e-ui`, after a fresh browser
-fast auto-created its workspace/session):
+Verified on the frozen tree (2026-11-05, isolated instance, real Chrome via
+Browser MCP, user tabs untouched; new tab opened and closed). DOM assertion for
+`/infini-goal 浏览器端审计验证目标`:
 
 ```json
-{"phase":"active","label":"自动推进中",
- "objective":"浏览器端目标 E2E-ui-proof","rounds":"轮次 1","schedule":"最小间隔 1m"}
+{"phase":"active","barAttr":"true","label":"自动推进中",
+ "objective":"浏览器端审计验证目标","rounds":"轮次 1","schedule":"最小间隔 1m",
+ "buttons":["暂停目标","清除目标"]}
 ```
 
-and the DOM contract: `<div class="infini-goal-dock" data-infini-goal-bar="true"
+Clicking pause produced `{"phase":"paused","label":"已暂停","buttons":["恢复目标","清除目标"]}`
+with no schedule line; clicking clear removed the bar (`barPresent:false`). The
+`data-infini-goal-bar` attribute value is the literal string `true`. The rendered
+DOM contract is `<div class="infini-goal-dock" data-infini-goal-bar="true"
 data-infini-goal-phase="active"> ... <span class="infini-goal-label">自动推进中
 </span><span class="infini-goal-objective" title="浏览器端目标 E2E-ui-proof">
 ...</span><span class="infini-goal-rounds">轮次 1</span><span
@@ -635,18 +667,19 @@ DSH_E2E_ROOT=/tmp/dsh-e2e-install DSH_E2E_WEB_PORT=34800 DSH_E2E_LLM_PORT=34801 
   tools/e2e/bootstrap.sh --fresh
 node scripts/install-profile.mjs \
   --dsh-home /tmp/dsh-e2e-install/home --profile e2e
-# -> backs up profile package.json, symlinks every @yankeguo/dsh-*infini-goal*
-#    package under profiles/e2e/node_modules/@yankeguo/, appends
+# -> backs up profile package.json, symlinks all 8 workspace packages under
+#    profiles/e2e/node_modules/@yankeguo/, appends
 #    @yankeguo/dsh-infini-goal-bundle to dsh.profile.bundles
 DSH_E2E_ROOT=/tmp/dsh-e2e-install ... tools/e2e/start-web.sh <control-plugin.patch.yml only>
 ```
 
-`probe-install.sh` automates exactly this and asserts:
+`probe-install.sh` automates exactly this and asserts (final frozen-tree run:
+isolated `/tmp/dsh-e2e-install-final`, ports 35300/35301 → **PROBE INSTALL PASS**):
 
 ```
 PASS no plugin load/startup errors in web.log
-PASS client entry @yankeguo/dsh-client-ui-infini-goal — url=plugins/??.../client.js&rev=ed64310a546f
-PASS client bundle @yankeguo/dsh-client-ui-infini-goal — HTTP 200, 23159 bytes
+PASS client entry @yankeguo/dsh-client-ui-infini-goal — url=plugins/??.../client.js&rev=<hash>
+PASS client bundle @yankeguo/dsh-client-ui-infini-goal — HTTP 200
 PASS installed client row is in window.__DSH_BOOT__
 PASS commands/list advertises /infini-goal — {"name":"infini-goal",...,"commandCount":7}
 PASS commands/execute creates the goal — Infini-goal created / Status: active

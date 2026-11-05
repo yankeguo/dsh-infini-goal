@@ -43,13 +43,19 @@ export interface InfiniGoalBlockReason {
  * round. The configuration is application-agnostic: any period during which
  * automatic continuation should stay quiet (off-hours, focus time, night
  * hours, business hours, and so on).
+ *
+ * `start` is inclusive and `end` exclusive; `end < start` crosses midnight into
+ * the next local day and the weekday filter applies to the day the window
+ * starts on. `end === start` is invalid: a zero-length or whole-day window is
+ * never what the caller means, and quiet windows that cover every local time
+ * are rejected by the scheduler.
  */
 export interface QuietWindow {
   /** ISO weekday numbers the window starts on (1 = Monday … 7 = Sunday); empty means every day. */
   readonly days: readonly number[]
   /** Local wall-clock start, `HH:mm`, inclusive. */
   readonly start: string
-  /** Local wall-clock end, `HH:mm`, exclusive; a value at or before `start` crosses midnight. */
+  /** Local wall-clock end, `HH:mm`, exclusive; a value before `start` crosses midnight. */
   readonly end: string
 }
 

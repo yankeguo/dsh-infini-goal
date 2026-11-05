@@ -47,6 +47,20 @@ describe('scheduleValue', () => {
     expect(scheduleValue(plan({ quietUntil: NOW + 7_200_000 }))?.quietUntil).toBe(NOW + 7_200_000)
   })
 
+  it('reports quietUntil equal to nextTriggerAt when a quiet window defers the trigger', () => {
+    const deferred = scheduleValue(plan({
+      reason: 'quiet-window',
+      nextAt: NOW + 7_200_000,
+      delayMs: 7_200_000,
+      quietUntil: NOW + 7_200_000,
+    }))
+    expect(deferred).toEqual({
+      nextTriggerAt: NOW + 7_200_000,
+      nextTriggerInMs: 7_200_000,
+      quietUntil: NOW + 7_200_000,
+    })
+  })
+
   it('returns null without a plan', () => {
     expect(scheduleValue(undefined)).toBeNull()
   })

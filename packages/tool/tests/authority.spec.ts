@@ -7,6 +7,7 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { InfiniGoalView } from '@yankeguo/dsh-infini-goal-protocol'
 import {
   completionAuthority,
+  infiniGoalToolExecution,
   infiniGoalRoundSourceOf,
   isDirectHumanSource,
   isMatchingInfiniGoalRoundSource,
@@ -194,5 +195,112 @@ describe('requireDirectHuman', () => {
     expect(() => requireDirectHuman(fakeContext([agent]), human)).not.toThrow()
     const round = execution([turnStartEvent(0), userEvent(1, ROUND_SOURCE)])
     expect(() => requireDirectHuman(fakeContext([agent]), { ...round, agent })).toThrow(/direct human turn/)
+  })
+})
+
+/** Running live agent fixture with an event history containing one turn start. */
+function runningAgent(status = 'running'): Agent {
+  return {
+    id: 'agent-1',
+    status,
+    session: { snapshotEvents: () => [turnStartEvent(0)] },
+  } as unknown as Agent
+}
+
+/** Minimal Context exposing the agent-registry reads the driver-boundary check uses. */
+function driverContext(
+  agent: Agent,
+  options: { live?: Agent; initiator?: Agent; openTurnStartSeq?: number | null } = {},
+): Context {
+  const live = 'live' in options ? options.live : agent
+  const initiator = 'initiator' in options ? options.initiator : agent
+  const openTurnStartSeq = 'openTurnStartSeq' in options ? options.openTurnStartSeq : 0
+  return {
+    agents: {
+      get: () => live,
+      currentInitiator: () => initiator,
+      roots: () => [agent],
+      turnBoundaryOf: () => ({
+        openTurnStartSeq,
+        lastStepStartSeq: null,
+        lastStepBoundary: null,
+        lastTurn: 1,
+      }),
+    },
+  } as unknown as Context
+}
+
+/** Build the bare tool-execution input the registry hands the tool body. */
+function toolRunContext(agent: Agent | undefined): Parameters<typeof infiniGoalToolExecution>[1] {
+  return { agent, arguments: {}, signal: new AbortController().signal } as unknown as Parameters<typeof infiniGoalToolExecution>[1]
+}
+
+/** Run one expected rejection and return its structured error. */
+function rejectionOf(run: () => unknown): HarnessError {
+  try {
+    run()
+  } catch (error: unknown) {
+    expect(error).toBeInstanceOf(HarnessError)
+    return error as HarnessError
+  }
+  throw new Error('expected the call to be rejected')
+}
+
+describe('infiniGoalToolExecution', () => {
+  it('rejects a call without a calling agent', () => {
+    const error = rejectionOf(() => infiniGoalToolExecution(driverContext(runningAgent()), toolRunContext(undefined)))
+    expect(error.code).toBe('INFINI_GOAL_TOOL_AGENT_REQUIRED')
+  })
+
+  it('rejects stale, non-running, and foreign-initiator calls', () => {
+    const staleAgent = runningAgent()
+    const stale = rejectionOf(() => infiniGoalToolExecution(
+      driverContext(staleAgent, { live: {} as Agent }),
+      toolRunContext(staleAgent),
+    ))
+    expect(stale.code).toBe('INFINI_GOAL_TOOL_DRIVER_REQUIRED')
+    const idleAgent = runningAgent('idle')
+    const idle = rejectionOf(() => infiniGoalToolExecution(
+      driverContext(idleAgent),
+      toolRunContext(idleAgent),
+    ))
+    expect(idle.code).toBe('INFINI_GOAL_TOOL_DRIVER_REQUIRED')
+    const foreignAgent = runningAgent()
+    const foreign = rejectionOf(() => infiniGoalToolExecution(
+      driverContext(foreignAgent, { initiator: {} as Agent }),
+      toolRunContext(foreignAgent),
+    ))
+    expect(foreign.code).toBe('INFINI_GOAL_TOOL_DRIVER_REQUIRED')
+  })
+
+  it('rejects a call outside an open model turn', () => {
+    const agent = runningAgent()
+    const error = rejectionOf(() => infiniGoalToolExecution(
+      driverContext(agent, { openTurnStartSeq: null }),
+      toolRunContext(agent),
+    ))
+    expect(error.code).toBe('INFINI_GOAL_TOOL_DRIVER_REQUIRED')
+    expect(error.message).toContain('open model turn')
+  })
+
+  it('returns the event cut and open-turn boundary for the exact live agent', () => {
+    const agent = runningAgent()
+    const executionResult = infiniGoalToolExecution(driverContext(agent), toolRunContext(agent))
+    expect(executionResult.agent).toBe(agent)
+    expect(executionResult.openTurnStartSeq).toBe(0)
+    expect(executionResult.events).toHaveLength(1)
+  })
+})
+
+describe('requireDirectHuman on a subagent', () => {
+  it('rejects human-looking input when the agent is not a runtime root', () => {
+    const agent = {} as Agent
+    const human: InfiniGoalToolExecution = {
+      agent,
+      events: [turnStartEvent(0), userEvent(1, { kind: 'user' })],
+      openTurnStartSeq: SessionSeq(0),
+    }
+    const error = rejectionOf(() => requireDirectHuman(fakeContext([]), human))
+    expect(error.code).toBe('INFINI_GOAL_TOOL_AUTHORITY_REQUIRED')
   })
 })

@@ -18,8 +18,7 @@
   "files": [
     "cordis.patch.yml",
     "icon.svg",
-    "README.md",
-    "docs"
+    "README.md"
   ],
   "dependencies": {
     "@yankeguo/dsh-infini-goal": "workspace:*",

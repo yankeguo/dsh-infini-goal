@@ -15,6 +15,7 @@ import type {} from '@yankeguo/dsh-infini-goal'
 import { INFINI_GOAL_COMMAND_NAME } from '@yankeguo/dsh-infini-goal-protocol'
 import type { InfiniGoalEditRequest, InfiniGoalRef, InfiniGoalView, TriggerPlan } from '@yankeguo/dsh-infini-goal-protocol'
 import {
+  COMMAND_GRAMMAR,
   CommandInputError,
   USAGE,
   parseInfiniGoalCommand,
@@ -40,15 +41,21 @@ const DESCRIPTION =
   'Inspect and control the endless infini-goal: create, edit, pause, resume, complete, block, clear, '
   + 'and set its pacing (minimum interval, quiet windows, time zone).'
 
-const INPUT_HINT =
-  '[<objective>|edit <objective>|pause|resume|complete|block <message>|clear'
-  + '|interval <duration>|quiet <windows|none>|timezone <IANA|system>]'
+const INPUT_HINT = COMMAND_GRAMMAR
+
+/** One pacing-settings subcommand: its `/infini-goal` keyword and its human label. */
+interface SettingsCommand {
+  /** Exact subcommand keyword, used in hints and missing-goal errors. */
+  readonly keyword: 'interval' | 'quiet' | 'timezone'
+  /** Human label used in the success title. */
+  readonly label: string
+}
 
 /**
  * Whether a thrown value is the core service's domain error. Checked
- * structurally as well as by class identity because the workspace build inlines
- * the core package into each plugin bundle, so the service may throw the same
- * error from a different module instance.
+ * structurally as well as by class identity so a duplicated core module
+ * instance (for example a deployment that loads the plugin from a second
+ * node_modules copy) still maps to the friendly command error.
  */
 function isInfiniGoalError(error: unknown): error is InfiniGoalError {
   if (error instanceof InfiniGoalError) return true
@@ -170,13 +177,19 @@ function executeClear(ctx: Context, invocation: CommandInvocation): CommandResul
 function executeSettings(
   ctx: Context,
   invocation: CommandInvocation,
-  label: string,
+  command: SettingsCommand,
   request: InfiniGoalEditRequest,
 ): CommandResult {
   const current = ctx.infiniGoals.get(invocation.agent)
-  if (current === undefined) return missingGoal(label)
+  if (current === undefined) return missingGoal(command.keyword)
+  if (current.phase === 'complete') {
+    return errorResult(
+      'The infini-goal is complete, so its pacing can no longer matter. '
+      + 'Start a new goal with /infini-goal <objective> and then configure its pacing.',
+    )
+  }
   const goal = ctx.infiniGoals.edit(invocation.agent, refOf(current), request)
-  return renderMutation(`Infini-goal ${label} updated`, goal, planOf(ctx, invocation, goal))
+  return renderMutation(`Infini-goal ${command.label} updated`, goal, planOf(ctx, invocation, goal))
 }
 
 /** Execute one already-parsed command against the core service. */
@@ -210,15 +223,15 @@ function executeInfiniGoalCommand(ctx: Context, invocation: CommandInvocation): 
       case 'clear':
         return executeClear(ctx, invocation)
       case 'interval':
-        return executeSettings(ctx, invocation, 'minimum interval', {
+        return executeSettings(ctx, invocation, { keyword: 'interval', label: 'minimum interval' }, {
           minIntervalMs: parseIntervalArgument(command.duration),
         })
       case 'quiet':
-        return executeSettings(ctx, invocation, 'quiet windows', {
+        return executeSettings(ctx, invocation, { keyword: 'quiet', label: 'quiet windows' }, {
           quietWindows: parseQuietArgument(command.windows),
         })
       case 'timezone':
-        return executeSettings(ctx, invocation, 'time zone', {
+        return executeSettings(ctx, invocation, { keyword: 'timezone', label: 'time zone' }, {
           timezone: parseTimezoneArgument(command.timezone),
         })
     }

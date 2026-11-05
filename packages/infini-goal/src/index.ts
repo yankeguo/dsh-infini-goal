@@ -17,6 +17,7 @@ import { z as zod } from 'zod'
 import type { ZodType } from 'zod'
 import { agentEvents } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { appendPluginRecord } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ProjectionDefinition, ProjectionHandle } from '@deepseek-ai/dsh-session-projection'
 import {
@@ -41,7 +42,7 @@ import type {
   InfiniGoalView,
   TriggerPlan,
 } from '@yankeguo/dsh-infini-goal-protocol'
-import { applyInfiniGoalEvent, infiniGoalChangeRef } from './fold.ts'
+import { applyInfiniGoalEvent, infiniGoalChangeRef, isInfiniGoalChangeEvent } from './fold.ts'
 import type { InfiniGoalFoldState } from './fold.ts'
 import {
   InfiniGoalError,
@@ -54,6 +55,7 @@ import {
   systemTimeZone,
 } from './runtime.ts'
 import type { Config, ResolvedConfig } from './runtime.ts'
+import { INFINI_GOAL_RECORD_TYPE } from './domain.ts'
 import type {
   InfiniGoalChange,
   InfiniGoalChanged,
@@ -66,6 +68,7 @@ export type * from './domain.ts'
 export type * from '@yankeguo/dsh-infini-goal-protocol'
 export { InfiniGoalError } from './runtime.ts'
 export type { Config, ResolvedConfig } from './runtime.ts'
+export { INFINI_GOAL_RECORD_TYPE } from './domain.ts'
 export {
   applyInfiniGoalChange,
   applyInfiniGoalEvent,
@@ -73,6 +76,7 @@ export {
   emptyInfiniGoalFoldState,
   foldInfiniGoal,
   infiniGoalChangeRef,
+  isInfiniGoalChangeEvent,
 } from './fold.ts'
 export type { InfiniGoalFoldState } from './fold.ts'
 
@@ -133,9 +137,10 @@ const infiniGoalProjectionStateSchema: ZodType<InfiniGoalProjectionState> = zod.
   if ((current.roundsStarted === 0) !== (current.lastRoundAt === null)) {
     context.addIssue({ code: 'custom', message: 'current goal lastRoundAt must be null exactly before the first admitted round' })
   }
-  if (current.lastRoundAt !== null && current.lastRoundAt < current.createdAt) {
-    context.addIssue({ code: 'custom', message: 'current goal lastRoundAt cannot precede its creation' })
-  }
+  // No check relates lastRoundAt to createdAt: the fold's create mutation is
+  // timestamp-clamped to the previous goal's update to survive a backwards
+  // wall clock, so a following round event may legitimately carry an earlier
+  // timestamp. A cross-field check here would reject state the fold produces.
   if ((current.goal.phase === 'blocked') !== (current.goal.blockedReason !== undefined)) {
     context.addIssue({ code: 'custom', message: 'current goal blocked reason must exist exactly while blocked' })
   }
@@ -191,7 +196,7 @@ export function applyInfiniGoalProjection(
   event: SessionEvent,
 ): InfiniGoalProjectionState {
   if (state.failure !== null) return state
-  if (event.type !== INFINI_GOAL_EVENT_TYPE
+  if (!isInfiniGoalChangeEvent(event)
     && (event.type !== 'user/message' || event.data.source.kind !== 'infini-goal')) return state
   const folded = foldStateFromProjection(state)
   try {
@@ -211,7 +216,10 @@ export const infiniGoalProjectionDefinition = {
   init: (): InfiniGoalProjectionState => ({ current: null, seenGoalIds: [], failure: null }),
   apply: applyInfiniGoalProjection,
   wire: { viewSchema: infiniGoalProjectionSchema, view: (state: InfiniGoalProjectionState) => state.current },
-  stateVersion: 1,
+  // 2: the durable representation changed from a required Session event to an
+  // ignorable plugin record, so a row folded by a unit that ignored those
+  // records must be discarded instead of forward-applied.
+  stateVersion: 2,
 } satisfies ProjectionDefinition<'infiniGoal', InfiniGoalProjectionState>
 
 /**
@@ -507,9 +515,17 @@ export class InfiniGoalService extends Service {
     return this.view(current)
   }
 
-  /** Append one mutation and publish its live notification after the commit. */
+  /**
+   * Append one mutation as an ignorable plugin record and publish its live
+   * notification after the commit.
+   *
+   * The record representation is load-bearing for durability: a custom
+   * `SessionEventMap` event would carry no `ignorable` marker, and the
+   * persisted-Session read path refuses unknown non-ignorable event types,
+   * which would make every Session containing a goal unreadable.
+   */
   private commit(agent: Agent, change: InfiniGoalChange): InfiniGoalProjection | null {
-    agent.session.append(INFINI_GOAL_EVENT_TYPE, change)
+    appendPluginRecord(agent.session, INFINI_GOAL_RECORD_TYPE, change)
     const current = this.state(agent.session)
     const goal = current === null ? undefined : this.view(current)
     const notification: InfiniGoalChanged = {

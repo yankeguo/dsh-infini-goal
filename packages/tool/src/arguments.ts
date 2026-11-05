@@ -84,11 +84,18 @@ export function parseMinIntervalArg(text: string): number {
 /**
  * Parse quiet-window text such as `Mo-Fr 09:00-18:00; Sa,Su 10:00-12:00`,
  * `HH:mm-HH:mm`, or `none`.
+ *
+ * Whitespace-only text is rejected instead of being treated as `none`: the
+ * strict tool schema uses `""` as the omitted filler, so a blank value is much
+ * more likely a mistake than a deliberate request to clear every quiet window.
  * @param text - model-supplied quiet-window text.
  * @returns normalized quiet windows; an empty list for `none`.
- * @throws {InfiniGoalToolInputError} when the text is not usable quiet-window grammar.
+ * @throws {InfiniGoalToolInputError} when the text is blank or is not usable quiet-window grammar.
  */
 export function parseQuietWindowsArg(text: string): QuietWindow[] {
+  if (text.trim().length === 0) {
+    reject('quiet_windows must not be blank; use "none" to disable quiet windows')
+  }
   try {
     return parseQuietWindows(text)
   } catch (error) {

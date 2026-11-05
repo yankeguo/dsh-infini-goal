@@ -18,6 +18,14 @@ describe('parseWeekdays', () => {
     expect(parseWeekdays('*')).toEqual([])
   })
 
+  it('treats only plain decimal digits as numeric weekdays', () => {
+    expect(parseWeekdays('01-03')).toEqual([1, 2, 3])
+    // `Number()` coercion would otherwise accept these as Monday.
+    expect(() => parseWeekdays('1.0')).toThrow()
+    expect(() => parseWeekdays('0x1')).toThrow()
+    expect(() => parseWeekdays('+1')).toThrow()
+  })
+
   it('rejects invalid selectors', () => {
     expect(() => parseWeekdays('Mo-')).toThrow()
     expect(() => parseWeekdays('Fr-Mo')).toThrow()
@@ -38,6 +46,13 @@ describe('clock helpers', () => {
     expect(() => parseClockTime('9')).toThrow()
     expect(() => parseClockTime('09:60')).toThrow()
   })
+
+  it('rejects minutes that are not a whole minute inside one day', () => {
+    expect(() => formatClockTime(-1)).toThrow()
+    expect(() => formatClockTime(1_440)).toThrow()
+    expect(() => formatClockTime(1.5)).toThrow()
+    expect(() => formatClockTime(Number.NaN)).toThrow()
+  })
 })
 
 describe('quiet window text form', () => {
@@ -54,6 +69,11 @@ describe('quiet window text form', () => {
     expect(parseQuietWindows('off')).toEqual([])
   })
 
+  it('accepts overnight windows (end before start) and rejects equal clocks', () => {
+    expect(parseQuietWindows('Mo 22:00-06:00')).toEqual([{ days: [1], start: '22:00', end: '06:00' }])
+    expect(() => parseQuietWindows('00:01-00:01')).toThrow(/must differ/)
+  })
+
   it('rejects malformed entries and whole-day windows', () => {
     expect(() => parseQuietWindows('09:00')).toThrow()
     expect(() => parseQuietWindows('09:00-09:00')).toThrow()
@@ -66,6 +86,15 @@ describe('validateQuietWindows', () => {
   it('normalizes object form', () => {
     expect(validateQuietWindows([{ days: [5, 1, 1], start: '9:00', end: '18:00' }]))
       .toEqual([{ days: [1, 5], start: '09:00', end: '18:00' }])
+  })
+
+  it('treats a missing `days` field as every day', () => {
+    expect(validateQuietWindows([{ start: '09:00', end: '18:00' }]))
+      .toEqual([{ days: [], start: '09:00', end: '18:00' }])
+  })
+
+  it('rejects sparse arrays instead of returning holes', () => {
+    expect(() => validateQuietWindows(new Array(1))).toThrow()
   })
 
   it('rejects invalid shapes', () => {

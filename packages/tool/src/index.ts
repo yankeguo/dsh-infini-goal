@@ -29,6 +29,7 @@ declare module '@deepseek-ai/dsh-llm' {
 
 import {
   InfiniGoalToolInputError,
+  UPDATE_ACTIONS,
   blockedReasonFromArgs,
   createRequestFromArgs,
   editRequestFromArgs,
@@ -103,9 +104,9 @@ function resolveConfig(config: Config): ResolvedConfig {
 
 /**
  * Whether a thrown value is the core service's domain error. Checked
- * structurally as well as by class identity because the workspace build inlines
- * the core package into each plugin bundle, so the service may throw the same
- * error from a different module instance.
+ * structurally as well as by class identity so a duplicated core module
+ * instance (for example a deployment that loads the plugin from a second
+ * node_modules copy) still maps to the structured tool failure.
  */
 function isInfiniGoalError(error: unknown): error is InfiniGoalError {
   if (error instanceof InfiniGoalError) return true
@@ -227,10 +228,11 @@ export function apply(ctx: Context, config: Config): void {
       action: {
         type: 'string',
         required: true,
-        enum: ['edit', 'pause', 'resume', 'complete', 'blocked', 'config'],
+        enum: [...UPDATE_ACTIONS],
         description: 'edit changes the objective and/or pacing settings; config changes only the pacing settings; '
           + 'edit, pause, resume, and config require a direct human request. complete and blocked are also allowed '
-          + 'during an automatic round of this goal; blocked is rejected before the configured minimum round count.',
+          + 'during an automatic round of this goal; a blocked reported from an automatic round is rejected before '
+          + 'the configured minimum round count, while a direct human request may block immediately.',
       },
       objective: {
         type: 'string',

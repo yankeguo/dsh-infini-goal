@@ -22,14 +22,19 @@ export function renderInfiniGoalRoundPrompt(goal: InfiniGoalView, round: number)
       + `Objective: ${JSON.stringify(goal.objective)}\n`
       + `Round: ${round} (there is no round limit; the goal stays active until it is completed, paused, blocked, or cleared)\n`
       + `Automatic pacing: rounds are spaced by at least ${formatDurationMs(goal.minIntervalMs)}; `
-      + `no automatic round starts inside the quiet windows ${JSON.stringify(quiet)} (time zone ${goal.timezone}).\n\n`
+      + `no automatic round starts inside the quiet windows ${JSON.stringify(quiet)} (time zone ${goal.timezone}). `
+      + 'A quiet window only suppresses automatic rounds; it is neither a failure nor a blocker.\n\n'
       + 'Continue working toward the objective in this same session. Treat the current workspace, tool results, '
       + 'and durable session state as authoritative; inspect them instead of assuming earlier narration is still current. '
-      + 'Make concrete progress and verify the result instead of only restating plans. Before claiming completion, '
-      + 'gather evidence that the whole objective is achieved, read the current goal with get_infini_goal, and mark '
-      + 'it complete with update_infini_goal. If work remains, leave the goal active for the next round. '
-      + 'If the same concrete blocking condition persisted across earlier rounds, follow the configured goal-tool '
-      + 'policy before reporting a blocker; difficulty, uncertainty, or remaining useful work is not a blocker.\n'
+      + 'Make concrete progress and verify the result instead of only restating plans. Human messages that arrived '
+      + 'between rounds take priority over this round: address them first, and never invent progress that the '
+      + 'session does not show.\n'
+      + 'Before claiming completion, gather evidence that the whole objective is achieved, read the current goal '
+      + 'with get_infini_goal, and mark it complete with update_infini_goal action "complete" using the current '
+      + 'goal id and revision. If work remains, leave the goal active for the next round; do not create a new '
+      + 'infini-goal. If the same concrete blocking condition persisted across earlier rounds, follow the '
+      + 'configured goal-tool policy before reporting a blocker with update_infini_goal action "blocked"; '
+      + 'difficulty, uncertainty, or remaining useful work is not a blocker.\n'
       + '</infini_goal_round>',
   }]
 }

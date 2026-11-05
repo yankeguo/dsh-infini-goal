@@ -1,8 +1,8 @@
 /**
- * Host-side vocabulary of the infini-goal domain: durable change payloads,
- * admitted-round message attribution, the live `infini-goal/changed` event,
- * stable error codes, and the merge declarations that make these shapes part
- * of the Host's own type tables.
+ * Host-side vocabulary of the infini-goal domain: durable change payloads, the
+ * `plugin:` record type that stores them, admitted-round message attribution,
+ * the live `infini-goal/changed` event, stable error codes, and the merge
+ * declarations that make these shapes part of the Host's own type tables.
  *
  * Kept apart from `@yankeguo/dsh-infini-goal-protocol` (the pure, client-safe
  * vocabulary) because these declarations pull dsh-agent, dsh-llm, dsh-session,
@@ -12,6 +12,9 @@
  */
 
 import type { Agent } from '@deepseek-ai/dsh-agent'
+// Type-only: pulls the Session type tables into the program so the
+// `declare module` augmentations below target loaded modules.
+import type {} from '@deepseek-ai/dsh-session/types'
 import type {
   InfiniGoalOperation,
   InfiniGoalProjection,
@@ -20,7 +23,21 @@ import type {
   InfiniGoalView,
 } from '@yankeguo/dsh-infini-goal-protocol'
 
-/** Full-snapshot mutation committed by a durable `infini-goal/change` event. */
+/**
+ * Session event type of the durable plugin record carrying one infini-goal
+ * change or clear tombstone.
+ *
+ * Host state cannot use a declared `SessionEventMap` member: the persisted
+ * Session read path refuses event types outside the harness's repository-built
+ * vocabulary unless the envelope is marked `ignorable`, and an out-of-tree
+ * plugin cannot add to that vocabulary. The documented channel for durable
+ * plugin-owned state is therefore a plugin record in the `plugin:` namespace
+ * (`appendPluginRecord`), which every reader retains and reloads while never
+ * projecting it into the model-visible surface.
+ */
+export const INFINI_GOAL_RECORD_TYPE = 'plugin:infini-goal/change'
+
+/** Full-snapshot mutation committed by one durable infini-goal change record. */
 export interface InfiniGoalSnapshotChange {
   readonly kind: 'infini-goal/change'
   readonly version: 1
@@ -49,7 +66,7 @@ export interface InfiniGoalClearChange {
   readonly clearedAt: number
 }
 
-/** Durable change union carried by the `infini-goal/change` session event. */
+/** Durable change union carried by the `plugin:infini-goal/change` Session record. */
 export type InfiniGoalChange = InfiniGoalSnapshotChange | InfiniGoalClearChange
 
 /** Message attribution for an admitted automatic continuation round. */
@@ -91,9 +108,9 @@ export interface FoldedInfiniGoal {
 /**
  * Strict checkpoint state of the `infiniGoal` projection unit.
  *
- * `current` is the durable goal derived from `infini-goal/change` events and
- * admitted rounds; `seenGoalIds` retains every created identity so reuse is
- * rejected during replay; `failure` holds the first strict replay failure.
+ * `current` is the durable goal derived from change records and admitted
+ * rounds; `seenGoalIds` retains every created identity so reuse is rejected
+ * during replay; `failure` holds the first strict replay failure.
  */
 export interface InfiniGoalProjectionState {
   /** Latest valid current goal, or null before creation and after clear. */
@@ -123,10 +140,22 @@ declare module '@deepseek-ai/dsh-llm' {
 }
 
 declare module '@deepseek-ai/dsh-session/types' {
-  interface SessionEventMap {
+  interface PluginRecordMap {
     /**
-     * Complete post-mutation infini-goal state or clear tombstone.
+     * Complete post-mutation infini-goal state or clear tombstone, stored as an
+     * ignorable plugin record so every harness build can reload the Session.
      */
+    'plugin:infini-goal/change': InfiniGoalChange
+  }
+
+  /**
+   * Retired session event type of the durable change. Declared only so the
+   * fold can replay an in-memory log written before a plugin hot-reload; this
+   * representation is NOT reloadable from storage because its event type is
+   * outside the harness's known vocabulary.
+   * @deprecated Never append it; write `plugin:infini-goal/change` records.
+   */
+  interface SessionEventMap {
     'infini-goal/change': InfiniGoalChange
   }
 }
@@ -134,8 +163,8 @@ declare module '@deepseek-ai/dsh-session/types' {
 declare module '@deepseek-ai/cordis' {
   interface Events {
     /**
-     * Infini-goal mutation accepted by one live agent. The matching
-     * `infini-goal/change` session event has already committed.
+     * Infini-goal mutation accepted by one live agent. The matching durable
+     * `plugin:infini-goal/change` record has already committed.
      * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners
      * receive only that agent.
      * @param payload.agent - agent whose session owns the goal.

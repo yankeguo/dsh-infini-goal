@@ -87,10 +87,16 @@ export function describeSchedule(projection: InfiniGoalProjection, now: number):
   const goal = projection.goal
   try {
     const plan = planTrigger(goal, projection.lastRoundAt, now)
-    if (plan.quietUntil !== null) {
+    // A quiet-window wait is identified by the reason first: the schedule
+    // contract makes `quietUntil === nextAt` for a deferred candidate, but a
+    // Host that predates that contract (mixed plugin versions) may report the
+    // deferred instant only through `nextAt`. Falling back to `nextAt` keeps
+    // the strip truthful without changing today's behavior.
+    const quietUntil = plan.quietUntil ?? (plan.reason === 'quiet-window' ? plan.nextAt : null)
+    if (quietUntil !== null) {
       return {
         key: 'waitingUntil',
-        params: { time: formatZonedClock(goal.timezone, plan.quietUntil) },
+        params: { time: formatZonedClock(goal.timezone, quietUntil) },
       }
     }
     if (plan.reason === 'interval') {

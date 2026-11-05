@@ -19,8 +19,10 @@ export function weekdayLabel(day: number): string {
 
 /** Resolve one numeric or labelled weekday token to an ISO weekday number. */
 function resolveWeekdayToken(token: string): number {
-  const numeric = Number(token)
-  if (Number.isSafeInteger(numeric)) {
+  // Only plain decimal digits are weekday numbers: `Number()` would otherwise
+  // accept junk such as `1.0`, `0x1`, or `+1` as Monday.
+  if (/^\d{1,2}$/u.test(token)) {
+    const numeric = Number(token)
     if (numeric < 1 || numeric > 7) throw new TypeError(`invalid weekday "${token}" (expected 1-7)`)
     return numeric
   }
@@ -33,8 +35,12 @@ function resolveWeekdayToken(token: string): number {
 
 /**
  * Parse one weekday selector such as `Mo-Fr`, `Sa,Su`, `1-5`, `3`, or `daily`.
+ *
+ * Ranges are ascending ISO order (`Mo-Fr`, `1-5`); a wrapping range such as
+ * `Fr-Mo` is invalid and must be written as two pieces (`Fr-Mo` → `Fr,Mo`).
  * @param token - caller-supplied selector.
- * @returns sorted unique ISO weekday numbers.
+ * @returns sorted unique ISO weekday numbers; empty for "every day".
+ * @throws {TypeError} when a day label or range is invalid.
  */
 export function parseWeekdays(token: string): number[] {
   const input = token.trim()
@@ -103,14 +109,34 @@ export function parseClockTime(value: string): number {
   return hour * 60 + minute
 }
 
-/** Render minutes after local midnight as `HH:mm`. */
+/**
+ * Render minutes after local midnight as `HH:mm`.
+ * @param minutes - whole minutes after local midnight (0-1439).
+ * @returns the clock time.
+ * @throws {TypeError} when `minutes` is not a whole minute inside one day.
+ */
 export function formatClockTime(minutes: number): string {
+  if (!Number.isSafeInteger(minutes) || minutes < 0 || minutes >= 1_440) {
+    throw new TypeError(`clock minutes must be an integer 0-1439, received ${String(minutes)}`)
+  }
   const hour = Math.floor(minutes / 60)
   const minute = minutes % 60
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
 
-/** Normalize and validate one caller-supplied quiet window. */
+/**
+ * Normalize and validate one caller-supplied quiet window.
+ *
+ * `start` is inclusive and `end` exclusive; `end < start` crosses midnight into
+ * the next local day and the weekday filter applies to the start day. Equal
+ * start and end would be a zero-length window, so it is rejected instead of
+ * being silently interpreted as a full day. An omitted (or YAML-empty, i.e.
+ * `null`) `days` field means every day; entries in an explicit array must be
+ * ISO weekday numbers 1-7.
+ * @param value - candidate window object with `days`, `start`, and `end`.
+ * @returns a normalized detached window.
+ * @throws {TypeError} when any field is invalid.
+ */
 export function validateQuietWindow(value: unknown): QuietWindow {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new TypeError('quiet window must be an object with start and end')
@@ -158,18 +184,27 @@ function normalizeClock(value: string): string {
 export function validateQuietWindows(value: unknown): QuietWindow[] {
   if (value === undefined || value === null) return []
   if (!Array.isArray(value)) throw new TypeError('quiet windows must be an array')
-  return value.map(entry => validateQuietWindow(entry))
+  // `Array.from` (not `map`) validates array holes instead of preserving them.
+  return Array.from(value, entry => validateQuietWindow(entry))
 }
 
 /**
  * Parse the human/model quiet-window text form.
  *
- * Entries are separated by `;`. Each entry is either `HH:mm-HH:mm` (every day)
- * or `<weekday selector> HH:mm-HH:mm`, for example
- * `Mo-Fr 09:00-18:00; Sa,Su 10:00-12:00`. `none`, `off`, and empty text mean no
- * quiet windows.
+ * Entries are separated by `;`; empty entries are ignored, so a trailing `;` is
+ * harmless. Each entry is either `HH:mm-HH:mm` (every day) or
+ * `<weekday selector> HH:mm-HH:mm`, for example
+ * `Mo-Fr 09:00-18:00; Sa,Su 10:00-12:00; 22:00-06:00`. `none`, `off`, and empty
+ * text mean no quiet windows; `always` and `all` are rejected because they would
+ * stop every automatic round forever.
+ *
+ * Semantics: `start` is inclusive, `end` exclusive; `end < start` crosses
+ * midnight; the weekday selector filters the day the window starts on and an
+ * empty selector means every day. Lists that together cover every local time
+ * are accepted here (the scheduler rejects them with a `RangeError`).
  * @param text - caller-supplied window text.
  * @returns normalized quiet windows.
+ * @throws {TypeError} when the text is not valid quiet-window syntax.
  */
 export function parseQuietWindows(text: string): QuietWindow[] {
   if (typeof text !== 'string') throw new TypeError('quiet windows must be a string')
@@ -198,7 +233,7 @@ export function parseQuietWindows(text: string): QuietWindow[] {
 /**
  * Render quiet windows in the canonical text form accepted by
  * {@link parseQuietWindows}.
- * @param windows - normalized windows.
+ * @param windows - normalized windows (as returned by {@link validateQuietWindows}).
  * @returns canonical text, or `none` when the list is empty.
  */
 export function formatQuietWindows(windows: readonly QuietWindow[]): string {

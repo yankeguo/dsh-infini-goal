@@ -47,8 +47,9 @@ function fiberActive(ctx: Context): boolean {
 export interface Config {
   /**
    * Whether an already-active durable goal resumes automatically when the
-   * plugin loads or a Session Agent is created. When false the goal stays
-   * active but silent until a human runs `/infini-goal resume`.
+   * plugin loads or a Session Agent is created. When false the driver persists
+   * a `pause` for that goal at startup, so it waits for an explicit human
+   * `/infini-goal resume` instead of silently continuing.
    */
   autoContinueOnStart?: boolean
   /** Safety poll interval used while the agent is transiently not ready (ms). */
@@ -79,6 +80,8 @@ interface RoundAttempt extends RoundIdentity {
   readonly messageId: MessageId
   readonly content: ContentBlock[]
   phase: 'queued' | 'claimed' | 'admitted'
+  /** Turn that claimed this round, once the loop's inbox reports it. */
+  turn: number | undefined
   cancelled: boolean
   stale: boolean
 }
@@ -94,6 +97,8 @@ interface DriverState {
   needsCheckpoint: boolean
   requested: boolean
   run: Promise<void> | undefined
+  /** True while the serialized driver is being started (re-entrancy fence). */
+  starting: boolean
   stopping: boolean
 }
 
@@ -122,6 +127,16 @@ function goalRef(goal: InfiniGoalView): InfiniGoalRef {
 /** Human-readable unexpected values for logs. */
 function renderThrown(value: unknown): string {
   return value instanceof Error ? value.message : String(value)
+}
+
+/** Human-readable message for a thrown error or a structured failure record. */
+function renderFailure(value: unknown): string {
+  if (value instanceof Error) return value.message
+  if (typeof value === 'object' && value !== null && 'message' in value) {
+    const message = (value as { readonly message?: unknown }).message
+    if (typeof message === 'string' && message.length > 0) return message
+  }
+  return renderThrown(value)
 }
 
 /** Materialize and validate plugin configuration. */
@@ -160,6 +175,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       needsCheckpoint: false,
       requested: false,
       run: undefined,
+      starting: false,
       stopping: false,
     }
     states.set(agent, state)
@@ -252,26 +268,69 @@ export function apply(ctx: Context, config: Config = {}): void {
     state.timer.unref?.()
   }
 
-  /** Block the current goal with one stable policy code, when still active. */
-  function reportBlock(state: DriverState, code: string, message: string): void {
+  /**
+   * Run one goal mutation outside the current synchronous stack.
+   *
+   * `Session.append` refuses to re-enter while another append is publishing its
+   * `session/event` observers. Blocking or pausing from a `turn/end` observer
+   * would therefore throw and be swallowed by the observer containment, leaving
+   * the durable goal active. Deferring to a microtask escapes that publish and
+   * still settles before the loop announces `idle`.
+   */
+  function deferGoalMutation(state: DriverState, run: () => void): void {
+    queueMicrotask(() => {
+      if (state.stopping || !fiberActive(ctx)) return
+      try {
+        run()
+      } catch (error: unknown) {
+        ctx.logger.warn(`infini-goal-driver: deferred goal mutation failed for agent "${state.agent.id}": ${renderThrown(error)}`)
+      }
+    })
+  }
+
+  /** Block one exact goal revision, ignoring a ref that moved on. */
+  function blockGoalAt(state: DriverState, expected: InfiniGoalRef, code: string, message: string): void {
     const goal = currentGoal(state)
-    if (!drivable(goal)) return
+    if (!drivable(goal) || goal.id !== expected.id || goal.revision !== expected.revision) return
     try {
-      ctx.infiniGoals.block(state.agent, goalRef(goal), { code, message })
+      ctx.infiniGoals.block(state.agent, expected, { code, message })
     } catch (error: unknown) {
       ctx.logger.warn(`infini-goal-driver: could not block goal for agent "${state.agent.id}": ${renderThrown(error)}`)
     }
   }
 
-  /** Pause the current goal when a running round was cancelled, when still active. */
-  function reportPause(state: DriverState, code: string): void {
+  /** Pause one exact goal revision, ignoring a ref that moved on. */
+  function pauseGoalAt(state: DriverState, expected: InfiniGoalRef, code: string): void {
     const goal = currentGoal(state)
-    if (!drivable(goal)) return
+    if (!drivable(goal) || goal.id !== expected.id || goal.revision !== expected.revision) return
     try {
-      ctx.infiniGoals.pause(state.agent, goalRef(goal))
+      ctx.infiniGoals.pause(state.agent, expected)
     } catch (error: unknown) {
       ctx.logger.warn(`infini-goal-driver: could not pause goal (${code}) for agent "${state.agent.id}": ${renderThrown(error)}`)
     }
+  }
+
+  /** Block the current goal with one stable policy code, when still active. */
+  function reportBlock(state: DriverState, code: string, message: string): void {
+    const goal = currentGoal(state)
+    if (!drivable(goal)) return
+    blockGoalAt(state, goalRef(goal), code, message)
+  }
+
+  /** Defer a block fenced to the goal revision observable right now. */
+  function deferBlockAtCurrentRevision(state: DriverState, code: string, message: string): void {
+    const goal = currentGoal(state)
+    if (!drivable(goal)) return
+    const expected = goalRef(goal)
+    deferGoalMutation(state, () => { blockGoalAt(state, expected, code, message) })
+  }
+
+  /** Defer a pause fenced to the goal revision observable right now. */
+  function deferPauseAtCurrentRevision(state: DriverState, code: string): void {
+    const goal = currentGoal(state)
+    if (!drivable(goal)) return
+    const expected = goalRef(goal)
+    deferGoalMutation(state, () => { pauseGoalAt(state, expected, code) })
   }
 
   /**
@@ -292,6 +351,10 @@ export function apply(ctx: Context, config: Config = {}): void {
       ctx.infiniGoals.pause(state.agent, goalRef(goal))
     } catch (error: unknown) {
       ctx.logger.warn(`infini-goal-driver: could not pause goal at startup for agent "${state.agent.id}": ${renderThrown(error)}`)
+      // A failed startup pause must not leave the goal active-but-silent: fall
+      // back to automatic continuation instead of stalling until a human event.
+      state.armed = true
+      reconsider(state)
     }
   }
 
@@ -315,27 +378,56 @@ export function apply(ctx: Context, config: Config = {}): void {
     }
 
     if (state.needsCheckpoint) {
+      // Consume the flag before awaiting: events that land while the flush is
+      // settling must request one more checkpoint instead of being erased.
+      state.needsCheckpoint = false
       try {
         await ctx.sessions.flush(agent.session)
-        state.needsCheckpoint = false
       } catch (error: unknown) {
         ctx.logger.warn(`infini-goal-driver: durability checkpoint failed for agent "${agent.id}": ${renderThrown(error)}`)
-        armRetry(state)
+        state.needsCheckpoint = true
+        const goal = currentGoal(state)
+        if (drivable(goal)) {
+          blockGoalAt(state, goalRef(goal), 'checkpoint-failed', `Could not checkpoint the session before the next infini-goal round: ${renderThrown(error)}`)
+        }
         return
       }
       if (!readyToDrive(state)) {
         armRetry(state)
         return
       }
+      if (state.needsCheckpoint) {
+        reconsider(state)
+        return
+      }
     }
 
-    if (state.attempt !== undefined) return
+    const pending = state.attempt
+    if (pending !== undefined) {
+      // A reservation that outlived its turn can never be admitted by this
+      // driver: withdraw it so the next quiescence can reserve a fresh round.
+      state.attempt = undefined
+      pending.stale = true
+      if (pending.phase === 'queued') {
+        try {
+          agent.inbox.remove(pending.messageId)
+        } catch (error: unknown) {
+          ctx.logger.warn(`infini-goal-driver: could not withdraw stale round for agent "${agent.id}": ${renderThrown(error)}`)
+        }
+      }
+      state.needsCheckpoint = true
+      state.requested = true
+      return
+    }
 
     const goal = currentGoal(state)
     if (!drivable(goal) || !state.armed) return
 
     const plan = planFor(state)
-    if (plan === undefined) return
+    if (plan === undefined) {
+      reconsider(state)
+      return
+    }
     if (plan.nextAt > Date.now()) {
       reconsider(state)
       return
@@ -347,6 +439,17 @@ export function apply(ctx: Context, config: Config = {}): void {
       await Promise.race([subagents.waitForChildren(agent), unloading.promise])
       if (!readyToDrive(state)) {
         armRetry(state)
+        return
+      }
+      // The child wait can cross a pacing boundary: never reserve a round that
+      // is now inside a quiet window (or before the minimum interval).
+      if (state.needsCheckpoint) {
+        reconsider(state)
+        return
+      }
+      const paced = planFor(state)
+      if (paced === undefined || paced.nextAt > Date.now()) {
+        reconsider(state)
         return
       }
     }
@@ -376,6 +479,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       messageId: message.id,
       content,
       phase: 'queued',
+      turn: undefined,
       cancelled: false,
       stale: false,
     }
@@ -394,7 +498,12 @@ export function apply(ctx: Context, config: Config = {}): void {
   function requestDrive(state: DriverState): void {
     if (state.stopping) return
     state.requested = true
-    if (state.run !== undefined) return
+    // `withoutInitiator` starts the async driver synchronously, and that prefix
+    // can dispatch a session flush whose observers mutate the goal and call
+    // back into requestDrive before `state.run` is assigned. The `starting`
+    // fence keeps exactly one serialized driver alive across that re-entry.
+    if (state.run !== undefined || state.starting) return
+    state.starting = true
     let run: Promise<void>
     try {
       run = ctx.agents.withoutInitiator(async () => {
@@ -404,21 +513,27 @@ export function apply(ctx: Context, config: Config = {}): void {
             await drive(state)
           } catch (error: unknown) {
             ctx.logger.warn(`infini-goal-driver: driver failed for agent "${state.agent.id}": ${renderThrown(error)}`)
-            reportBlock(state, 'driver-error', `Infini-goal driver failed: ${renderThrown(error)}`)
+            deferBlockAtCurrentRevision(state, 'driver-error', `Infini-goal driver failed: ${renderThrown(error)}`)
           }
         }
       })
     } catch (error: unknown) {
+      state.starting = false
+      state.requested = false
       ctx.logger.warn(`infini-goal-driver: could not start driver for agent "${state.agent.id}": ${renderThrown(error)}`)
+      deferBlockAtCurrentRevision(state, 'driver-error', `Could not start the infini-goal driver: ${renderThrown(error)}`)
       return
     }
+    state.starting = false
     state.run = run
     const retire = (): void => {
+      if (state.run !== run) return
       state.run = undefined
       if (state.requested && !state.stopping) requestDrive(state)
     }
     void run.then(retire, (error: unknown) => {
       ctx.logger.warn(`infini-goal-driver: driver task rejected for agent "${state.agent.id}": ${renderThrown(error)}`)
+      deferBlockAtCurrentRevision(state, 'driver-error', `Infini-goal driver task rejected: ${renderThrown(error)}`)
       retire()
     })
   }
@@ -428,7 +543,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     const attempt = state.attempt
     const goal = currentGoal(state)
     return fiberActive(ctx)
-      && !state.stopping && attempt !== undefined && attempt.phase === 'claimed'
+      && !state.stopping && state.armed && attempt !== undefined && attempt.phase === 'claimed'
       && !attempt.stale && sameQueued(content, source, attempt)
       && goal !== undefined && goal.id === source.goalId && goal.revision === source.revision
       && goal.phase === 'active'
@@ -446,12 +561,13 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   // One composite effect keeps every listener and timer owned by this plugin.
   ctx.effect(function* () {
-    ctx.on('agent/error', ({ agent }) => {
+    ctx.on('agent/error', ({ agent, turn, error }) => {
       const state = stateFor(agent)
-      // A failure outside an automatic round belongs to the human turn; keep the
-      // goal active and let the next idle quiescence schedule another round.
-      if (state.attempt === undefined) return
-      reportBlock(state, 'agent-error', 'The agent failed during an automatic infini-goal round.')
+      // A failure outside the automatic round's own turn belongs to human work;
+      // keep the goal active and let the next idle quiescence schedule again.
+      const attempt = state.attempt
+      if (attempt === undefined || attempt.turn !== turn) return
+      reportBlock(state, 'agent-error', `The agent failed during an automatic infini-goal round: ${renderFailure(error)}`)
     })
 
     ctx.on('agent/disposed', ({ agent }) => {
@@ -464,6 +580,14 @@ export function apply(ctx: Context, config: Config = {}): void {
 
     ctx.on('agent/created', ({ agent }): undefined => {
       const state = stateFor(agent)
+      const attempt = state.attempt
+      if (attempt?.phase === 'queued') {
+        try {
+          agent.inbox.remove(attempt.messageId)
+        } catch (error: unknown) {
+          ctx.logger.warn(`infini-goal-driver: could not withdraw round on agent creation for agent "${agent.id}": ${renderThrown(error)}`)
+        }
+      }
       state.attempt = undefined
       state.competingQueued = false
       state.needsCheckpoint = false
@@ -485,6 +609,12 @@ export function apply(ctx: Context, config: Config = {}): void {
           }
         }
         state.attempt = undefined
+        // A reservation discarded before its turn could run means the agent was
+        // cancelled while a round was pending: pause for an explicit decision
+        // instead of silently re-arming another round.
+        if (attempt.cancelled && !state.stopping) {
+          pauseGoalAt(state, { id: attempt.goalId, revision: attempt.revision }, 'round-cancelled')
+        }
       }
       // The next reservation must observe everything the finished turn committed.
       state.needsCheckpoint = true
@@ -500,6 +630,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         || change.operation === 'clear') {
         state.armed = false
         const attempt = state.attempt
+        const roundInFlight = attempt !== undefined && (attempt.phase === 'claimed' || attempt.phase === 'admitted')
         if (attempt !== undefined) {
           attempt.stale = true
           if (attempt.phase === 'queued') {
@@ -511,13 +642,25 @@ export function apply(ctx: Context, config: Config = {}): void {
           }
           state.attempt = undefined
         }
-        // A host-initiated pause aborts the live turn so the model cannot keep acting.
-        if (change.operation === 'pause' && agent.status === 'running'
+        // A host-initiated terminal mutation aborts the live automatic round so
+        // the model cannot keep acting (a human turn is left untouched).
+        if (roundInFlight && agent.status === 'running'
           && ctx.agents.currentInitiator() !== agent) {
           agent.cancel({ kind: 'user' }, { keepInbox: true })
         }
         clearTimers(state)
         return
+      }
+      if (change.operation === 'edit') {
+        // An edit that lands after the step proposal was validated but before
+        // the loop commits its user/message would make the strict fold reject a
+        // round carrying the old revision. Withdraw the not-yet-admitted round
+        // instead of corrupting the projection; the next round uses the new ref.
+        const attempt = state.attempt
+        if (attempt !== undefined && attempt.phase === 'claimed' && agent.status === 'running'
+          && ctx.agents.currentInitiator() !== agent) {
+          agent.cancel({ kind: 'parent' }, { keepInbox: true })
+        }
       }
       if (change.operation === 'create' || change.operation === 'resume') state.armed = true
       reconsider(state)
@@ -531,11 +674,12 @@ export function apply(ctx: Context, config: Config = {}): void {
       state.competingQueued = true
       if (attempt?.phase === 'queued') attempt.stale = true
     })
-    ctx.on('agent/inbox/claimed', ({ agent, message }) => {
+    ctx.on('agent/inbox/claimed', ({ agent, message, turn }) => {
       const state = stateFor(agent)
       const attempt = state.attempt
       if (attempt !== undefined && sameQueued(message.content, message.source, attempt)) {
         attempt.phase = 'claimed'
+        attempt.turn = turn
       }
     })
     ctx.on('agent/inbox/discarded', ({ agent, message }) => {
@@ -557,29 +701,46 @@ export function apply(ctx: Context, config: Config = {}): void {
           }
           return
         case 'turn/end': {
-          const reason = event.data.reason
+          const { turn, reason } = event.data
+          const attempt = state.attempt
+          // Only the turn that owns the reservation may settle its outcome; a
+          // human turn running after the round must not block or pause the goal.
+          const ownsTurn = attempt !== undefined && attempt.turn === turn
           if (reason.kind === 'max-tokens') {
-            if (state.attempt !== undefined) {
-              reportBlock(state, 'max-tokens', 'An automatic infini-goal round reached its output-token ceiling.')
-            }
+            if (!ownsTurn) return
+            state.attempt = undefined
+            deferBlockAtCurrentRevision(state, 'max-tokens', 'An automatic infini-goal round reached its output-token ceiling.')
             return
           }
           if (reason.kind === 'error') {
-            if (state.attempt !== undefined) {
-              reportBlock(state, 'turn-error', `An automatic infini-goal round failed: ${reason.error.message}`)
-            }
+            if (!ownsTurn) return
+            state.attempt = undefined
+            deferBlockAtCurrentRevision(state, 'turn-error', `An automatic infini-goal round failed: ${reason.error.message}`)
             return
           }
-          if (reason.kind !== 'aborted') return
+          if (reason.kind !== 'aborted') {
+            // The round's own turn closed normally (or was rejected): the
+            // reservation cannot be admitted any more.
+            if (ownsTurn) state.attempt = undefined
+            return
+          }
           const cause = reason.reason
           if (cause.kind === 'disposed') {
+            // Agent disposal keeps the durable phase untouched for the next owner.
             state.armed = false
+            if (ownsTurn) state.attempt = undefined
             return
           }
-          if (state.attempt !== undefined) {
-            state.attempt.cancelled = true
+          if (ownsTurn && attempt !== undefined) {
+            attempt.cancelled = true
             state.attempt = undefined
-            reportPause(state, 'round-aborted')
+            // A cancelled round means a human (or hook) took the wheel: pause the
+            // goal durably, fenced to the revision the round was admitted under.
+            // `parent` cancellations are owner/driver-internal (unload, a stale
+            // round, a terminal goal mutation) and must not pause the goal.
+            if (!state.stopping && cause.kind !== 'parent') {
+              deferPauseAtCurrentRevision(state, 'round-aborted')
+            }
           }
           return
         }
@@ -588,7 +749,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       }
     })
 
-    ctx.on('agent/pre-step', async ({ agent, messages, signal }, next): Promise<PreStepDecision> => {
+    ctx.on('agent/pre-step', async ({ agent, messages, signal, turn }, next): Promise<PreStepDecision> => {
       const submitted = messages.find((message): message is UserMessage & { source: InfiniGoalMessageSource } => isInfiniGoalRoundSource(message.source))
       if (submitted === undefined) return next()
       const { content, source } = submitted
@@ -639,6 +800,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         reconsider(state)
         return { kind: 'reject' }
       }
+      if (state.attempt !== undefined) state.attempt.turn ??= turn
       return { ...decision, startsRequestSeries: true }
     })
 
@@ -653,11 +815,22 @@ export function apply(ctx: Context, config: Config = {}): void {
       const waits: Promise<void>[] = []
       for (const state of states.values()) {
         state.stopping = true
+        state.armed = false
         clearTimers(state)
         const attempt = state.attempt
+        state.attempt = undefined
         if (attempt !== undefined) {
           attempt.stale = true
-          if (state.agent.status === 'running') {
+          if (attempt.phase === 'queued') {
+            // A round that never entered its turn would otherwise be admitted as
+            // an ordinary user turn by the next owner of this agent.
+            try {
+              state.agent.inbox.remove(attempt.messageId)
+            } catch (error: unknown) {
+              ctx.logger.warn(`infini-goal-driver: could not withdraw queued round on unload for agent "${state.agent.id}": ${renderThrown(error)}`)
+            }
+          } else if (state.agent.status === 'running') {
+            // Only an admitted round owns a turn; never abort unrelated human work.
             state.agent.cancel({ kind: 'parent' })
             waits.push(state.agent.whenIdle())
           }

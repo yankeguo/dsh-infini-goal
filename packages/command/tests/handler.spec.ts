@@ -272,6 +272,62 @@ describe('infini-goal command handler', () => {
     expect(text(noGoal)).toContain('No infini-goal is currently set')
   })
 
+  it('names the canonical subcommand in missing-goal errors', async () => {
+    const { handler } = boot()
+    for (const [line, keyword] of [
+      ['interval 5m', 'interval'],
+      ['quiet none', 'quiet'],
+      ['timezone UTC', 'timezone'],
+    ] as const) {
+      const result = await run(handler, line)
+      expect(result.kind).toBe('error')
+      expect(text(result)).toContain(`/infini-goal ${keyword} requires one`)
+    }
+  })
+
+  it('accepts quoted argument values', async () => {
+    const { handler, goals } = boot()
+    expect(text(await run(handler, '"Ship the docs"'))).toContain('Infini-goal created')
+    expect(goals.goal?.objective).toBe('Ship the docs')
+    expect(text(await run(handler, 'quiet "Mo-Fr 09:00-18:00"'))).toContain('quiet windows updated')
+    expect(goals.goal?.quietWindows).toEqual([{ days: [1, 2, 3, 4, 5], start: '09:00', end: '18:00' }])
+    expect(text(await run(handler, 'interval "5m"'))).toContain('minimum interval updated')
+    expect(goals.goal?.minIntervalMs).toBe(300_000)
+    expect(text(await run(handler, 'timezone "UTC"'))).toContain('time zone updated')
+    expect(goals.goal?.timezone).toBe('UTC')
+    expect(text(await run(handler, 'edit "Ship v2"'))).toContain('Infini-goal updated')
+    expect(goals.goal?.objective).toBe('Ship v2')
+    expect(text(await run(handler, 'block "waiting on credentials"'))).toContain('Infini-goal blocked')
+    expect(goals.goal?.blockedReason).toEqual({ code: 'human-reported', message: 'waiting on credentials' })
+  })
+
+  it('refuses pacing changes on a completed goal', async () => {
+    const { handler, goals } = boot()
+    await run(handler, 'Ship the docs')
+    await run(handler, 'complete')
+    const before = goals.goal?.minIntervalMs
+    const result = await run(handler, 'interval 5m')
+    expect(result.kind).toBe('error')
+    expect(text(result)).toContain('complete')
+    expect(goals.goal?.minIntervalMs).toBe(before)
+    expect(goals.goal?.phase).toBe('complete')
+  })
+
+  it('accepts the explicit status alias and reports clearing an empty session', async () => {
+    const { handler } = boot()
+    expect(text(await run(handler, 'status'))).toContain('No infini-goal is currently set.')
+    expect(text(await run(handler, 'clear'))).toBe('No infini-goal to clear.')
+  })
+
+  it('does not convert unexpected implementation failures into command results', async () => {
+    const { handler, goals } = boot()
+    await run(handler, 'Ship the docs')
+    goals.get = () => {
+      throw new Error('boom')
+    }
+    await expect(run(handler, '')).rejects.toThrow('boom')
+  })
+
   it('rejects attachments with a clear message', async () => {
     const { handler } = boot()
     const result = await run(handler, 'Ship the docs', [{ type: 'text', text: 'attachment' }])

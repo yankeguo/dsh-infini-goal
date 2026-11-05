@@ -20,6 +20,7 @@ export const zh = {
   'action.resume': '恢复目标',
   'action.clear': '清除目标',
   'error.command': '命令失败：{message}（{code}）',
+  'error.rejected': '命令被拒绝：{message}',
   'error.unknown': '命令执行失败：{message}',
 } satisfies Record<string, string>
 
@@ -43,5 +44,6 @@ export const en = {
   'action.resume': 'Resume goal',
   'action.clear': 'Clear goal',
   'error.command': 'Command failed: {message} ({code})',
+  'error.rejected': 'Command rejected: {message}',
   'error.unknown': 'Command failed: {message}',
 } satisfies Record<InfiniGoalKey, string>

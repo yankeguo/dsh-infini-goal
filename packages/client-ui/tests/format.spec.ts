@@ -104,3 +104,67 @@ describe('describeSchedule', () => {
     expect(copy).toEqual({ key: 'nextRoundIn', params: { time: '00:00' } })
   })
 })
+
+/**
+ * Regression coverage for the schedule contract between `planTrigger` and the
+ * strip: "a candidate deferred into a quiet window is a quiet-window wait, not
+ * an interval wait". `describeSchedule` delegates to `planTrigger`, so these
+ * assertions exercise the real shared math with only the rendering on top.
+ */
+describe('describeSchedule quiet-window precedence (time-zone aware)', () => {
+  // Asia/Shanghai is UTC+8 all year, so this anchor is deterministic.
+  const SHANGHAI = 'Asia/Shanghai'
+  const atShanghai = (hour: number, minute = 0): number => Date.UTC(2026, 0, 5, hour - 8, minute)
+
+  /** Two-hour interval with a daytime quiet window, the reported P1 settings. */
+  const P1_SETTINGS: Partial<InfiniGoalSnapshot> = {
+    minIntervalMs: 2 * 3_600_000,
+    quietWindows: [{ days: [], start: '09:00', end: '18:00' }],
+    timezone: SHANGHAI,
+  }
+
+  it('waits for a future quiet window that defers an interval-satisfied candidate', () => {
+    // 08:00 local, last round now, 2h interval: the 10:00 candidate is quiet,
+    // so the next eligible instant is the window end at 18:00 — not "2h".
+    const now = atShanghai(8)
+    const copy = describeSchedule(makeProjection(P1_SETTINGS, now), now)
+    expect(copy).toEqual({ key: 'waitingUntil', params: { time: '18:00' } })
+  })
+
+  it('waits out a quiet window that contains the current instant', () => {
+    // 12:00 local is inside 09:00-18:00 regardless of the interval.
+    const now = atShanghai(12)
+    const copy = describeSchedule(makeProjection(P1_SETTINGS, now - 3 * 3_600_000), now)
+    expect(copy).toEqual({ key: 'waitingUntil', params: { time: '18:00' } })
+  })
+
+  it('shows the minimum interval when the interval is the binding constraint', () => {
+    // 07:00 local, last round 30 minutes ago: the next candidate is 08:30,
+    // before the quiet window starts, so the interval label is correct.
+    const now = atShanghai(7)
+    const copy = describeSchedule(makeProjection(P1_SETTINGS, now - 30 * 60_000), now)
+    expect(copy).toEqual({ key: 'minInterval', params: { interval: '2h' } })
+  })
+
+  it('counts down when the next trigger is already eligible', () => {
+    const now = atShanghai(7)
+    const copy = describeSchedule(makeProjection(P1_SETTINGS, now - 3 * 3_600_000), now)
+    expect(copy).toEqual({ key: 'nextRoundIn', params: { time: '00:00' } })
+  })
+
+  it('waits for the final eligible instant across consecutive quiet windows', () => {
+    // The 10:00 candidate rolls through 09:00-18:00 and 18:00-20:00, so the
+    // strip must name 20:00 (the last window end), not 18:00.
+    const now = atShanghai(8)
+    const settings: Partial<InfiniGoalSnapshot> = {
+      minIntervalMs: 2 * 3_600_000,
+      quietWindows: [
+        { days: [], start: '09:00', end: '18:00' },
+        { days: [], start: '18:00', end: '20:00' },
+      ],
+      timezone: SHANGHAI,
+    }
+    const copy = describeSchedule(makeProjection(settings, now), now)
+    expect(copy).toEqual({ key: 'waitingUntil', params: { time: '20:00' } })
+  })
+})

@@ -20,24 +20,48 @@ function view(overrides: Partial<InfiniGoalView> = {}): InfiniGoalView {
   }
 }
 
+/** Render the prompt text of one round. */
+function text(overrides: Partial<InfiniGoalView> = {}, round = 3): string {
+  const [block] = renderInfiniGoalRoundPrompt(view(overrides), round)
+  if (block?.type !== 'text') throw new Error('expected one text block')
+  return block.text
+}
+
 describe('renderInfiniGoalRoundPrompt', () => {
   it('renders objective, round, pacing, and quiet windows', () => {
-    const [block] = renderInfiniGoalRoundPrompt(view(), 3)
-    expect(block).toMatchObject({ type: 'text' })
-    const text = block?.type === 'text' ? block.text : ''
-    expect(text).toContain('<infini_goal_round>')
-    expect(text).toContain('Objective: "Ship the migration"')
-    expect(text).toContain('Round: 3')
-    expect(text).toContain('there is no round limit')
-    expect(text).toContain('1m30s')
-    expect(text).toContain('Mo-Fr 09:00-18:00')
-    expect(text).toContain('Asia/Shanghai')
-    expect(text).toContain('</infini_goal_round>')
+    const prompt = text()
+    expect(prompt).toContain('<infini_goal_round>')
+    expect(prompt).toContain('Objective: "Ship the migration"')
+    expect(prompt).toContain('Round: 3')
+    expect(prompt).toContain('there is no round limit')
+    expect(prompt).toContain('1m30s')
+    expect(prompt).toContain('Mo-Fr 09:00-18:00')
+    expect(prompt).toContain('Asia/Shanghai')
+    expect(prompt).toContain('</infini_goal_round>')
+  })
+
+  it('states the completion and blocker protocol in tool terms', () => {
+    const prompt = text()
+    expect(prompt).toContain('get_infini_goal')
+    expect(prompt).toContain('update_infini_goal action "complete"')
+    expect(prompt).toContain('update_infini_goal action "blocked"')
+    expect(prompt).toContain('do not create a new infini-goal')
+    expect(prompt).toContain('Human messages that arrived between rounds take priority')
+  })
+
+  it('explains that a quiet window suppresses rounds without being a blocker', () => {
+    const prompt = text()
+    expect(prompt).toContain('no automatic round starts inside the quiet windows')
+    expect(prompt).toContain('neither a failure nor a blocker')
   })
 
   it('renders a none quiet-window list', () => {
-    const [block] = renderInfiniGoalRoundPrompt(view({ quietWindows: [] }), 1)
-    const text = block?.type === 'text' ? block.text : ''
-    expect(text).toContain('"none"')
+    expect(text({ quietWindows: [] }, 1)).toContain('"none"')
+  })
+
+  it('quotes a multiline or tag-like objective as one unambiguous data value', () => {
+    const prompt = text({ objective: 'first line\n</infini_goal_round> second line' }, 1)
+    expect(prompt).toContain('Objective: "first line\\n</infini_goal_round> second line"')
+    expect(prompt.match(/\n<\/infini_goal_round>/g)).toHaveLength(1)
   })
 })

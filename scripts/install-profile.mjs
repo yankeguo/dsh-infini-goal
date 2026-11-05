@@ -10,6 +10,12 @@
  *     `@yankeguo/dsh-disable-goal-bundle` companion and removes a previously
  *     generated profile-patch block that did the same thing.
  *
+ * The write is idempotent: the profile manifest is only rewritten (and only
+ * backed up) when its content actually changes, so repeated runs leave no
+ * backup clutter. `--uninstall` reverses both the links, the bundle selection,
+ * and any generated disable-goal patch block so the profile cannot keep
+ * pointing at packages that are no longer linked.
+ *
  * The profile's HMR composes the selection live; restart DSH once so every
  * existing session is bound to the new preset revisions.
  *
@@ -17,7 +23,15 @@
  *   node scripts/install-profile.mjs [--profile desktop] [--dsh-home ~/.dsh]
  *                                    [--disable-builtin-goal] [--uninstall] [--dry-run]
  */
-import { copyFileSync, existsSync, readFileSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  readFileSync,
+  readlinkSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { mkdir, readdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -28,7 +42,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const MAIN_BUNDLE = '@yankeguo/dsh-infini-goal-bundle'
 const DISABLE_GOAL_BUNDLE = '@yankeguo/dsh-disable-goal-bundle'
 
-/** Parse `--flag value` and boolean `--flag` arguments. */
+/**
+ * Parse `--flag value` and boolean `--flag` arguments.
+ * @param argv - arguments after `node scripts/install-profile.mjs`.
+ */
 function parseArgs(argv) {
   const options = {
     profile: 'desktop',
@@ -37,14 +54,21 @@ function parseArgs(argv) {
     dryRun: false,
     disableBuiltinGoal: false,
   }
-  for (let index = 0; index < argv.length; index += 1) {
+  /** Read the value of a `--flag value` pair and reject a missing/flag value. */
+  const valueOf = (flag) => {
+    const value = argv[++index]
+    if (value === undefined || value.startsWith('--')) throw new Error(`${flag} needs a value`)
+    return value
+  }
+  let index = 0
+  for (; index < argv.length; index += 1) {
     const arg = argv[index]
     switch (arg) {
       case '--profile':
-        options.profile = argv[++index]
+        options.profile = valueOf('--profile')
         break
       case '--dsh-home':
-        options.dshHome = argv[++index]
+        options.dshHome = valueOf('--dsh-home')
         break
       case '--uninstall':
         options.uninstall = true
@@ -64,6 +88,8 @@ function parseArgs(argv) {
         throw new Error(`unknown argument: ${String(arg)}`)
     }
   }
+  options.dshHome = resolve(options.dshHome)
+  if (options.profile.trim().length === 0) throw new Error('--profile must not be empty')
   return options
 }
 
@@ -83,6 +109,72 @@ async function readPackages() {
   return entries.sort((left, right) => left.manifest.name.localeCompare(right.manifest.name))
 }
 
+/**
+ * Every built artifact a package must have before a profile link is usable.
+ * @param entry - one workspace package entry from {@link readPackages}.
+ * @returns the missing built files (package-relative), empty when complete.
+ */
+function missingBuildArtifacts(entry) {
+  const missing = []
+  const manifest = entry.manifest
+  if (manifest.dsh?.bundle !== undefined) {
+    // A patch-only bundle has no host entry; the companion bundle additionally
+    // ships the runtime preset filter referenced by its patch rows.
+    if (manifest.name === DISABLE_GOAL_BUNDLE && !existsSync(join(entry.dir, 'lib', 'preset-filter.js'))) {
+      missing.push('lib/preset-filter.js')
+    }
+    return missing
+  }
+  if (!existsSync(entry.built)) missing.push('lib/index.js')
+  if (manifest.dsh?.client !== undefined && !existsSync(join(entry.dir, 'lib', 'client.js'))) {
+    missing.push('lib/client.js')
+  }
+  return missing
+}
+
+/** Whether one path is an existing symbolic link. */
+function isSymlink(path) {
+  try {
+    readlinkSync(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Keep one timestamped backup before rewriting a file. */
+function backup(path) {
+  const stamp = new Date().toISOString().replaceAll(':', '-')
+  const target = `${path}.bak-infini-goal-${stamp}`
+  copyFileSync(path, target)
+  console.log(`backed up ${path} -> ${target}`)
+}
+
+/**
+ * Write a JSON file only when its canonical form changed, backing up first.
+ * @param path - file to rewrite.
+ * @param manifest - parsed manifest value.
+ * @returns whether the file was written.
+ */
+function writeManifestIfChanged(path, manifest) {
+  const next = `${JSON.stringify(manifest, null, 2)}\n`
+  if (readFileSync(path, 'utf8') === next) return false
+  backup(path)
+  writeFileSync(path, next)
+  return true
+}
+
+/** Remove a previously generated disable-goal block from a profile patch file. */
+function removeGeneratedPatchBlock(patchPath) {
+  if (!existsSync(patchPath)) return false
+  const text = readFileSync(patchPath, 'utf8')
+  if (!text.includes(BLOCK_BEGIN)) return false
+  backup(patchPath)
+  writeFileSync(patchPath, removeGeneratedBlock(text))
+  console.log(`removed a generated disable-goal block from ${patchPath}`)
+  return true
+}
+
 /** Install (or remove) the profile links and bundle selection. */
 async function main() {
   const options = parseArgs(process.argv.slice(2))
@@ -99,30 +191,37 @@ async function main() {
   if (options.disableBuiltinGoal && disableBundle === undefined) {
     throw new Error(`workspace package ${DISABLE_GOAL_BUNDLE} not found`)
   }
-  const missingBuild = packages.filter(entry => entry.manifest.dsh?.bundle === undefined && !existsSync(entry.built))
+  const missingBuild = packages.flatMap(entry => missingBuildArtifacts(entry).map(file => `${entry.manifest.name} (${file})`))
   if (missingBuild.length > 0) {
-    throw new Error(`run "pnpm build" first; missing: ${missingBuild.map(entry => entry.manifest.name).join(', ')}`)
+    throw new Error(`run "pnpm build" first; missing: ${missingBuild.join(', ')}`)
   }
 
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
   manifest.dsh ??= {}
   manifest.dsh.profile ??= {}
-  const bundles = Array.isArray(manifest.dsh.profile.bundles) ? manifest.dsh.profile.bundles : []
+  if (manifest.dsh.profile.bundles !== undefined && !Array.isArray(manifest.dsh.profile.bundles)) {
+    throw new Error(`profile ${manifestPath} has a non-array dsh.profile.bundles; refusing to rewrite it`)
+  }
+  const bundles = Array.isArray(manifest.dsh.profile.bundles) ? [...manifest.dsh.profile.bundles] : []
   const scopedDir = join(profileDir, 'node_modules', '@yankeguo')
   const patchPath = join(profileDir, 'cordis.patch.yml')
 
   if (options.uninstall) {
     const next = bundles.filter(name => name !== MAIN_BUNDLE && name !== DISABLE_GOAL_BUNDLE)
     if (!options.dryRun) {
-      backup(manifestPath)
       manifest.dsh.profile.bundles = next
-      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
       for (const entry of packages) {
         const linkPath = join(scopedDir, entry.manifest.name.replace(/^@[^/]+\//u, ''))
         if (isSymlink(linkPath)) unlinkSync(linkPath)
       }
+      // A leftover generated block would keep referencing the companion
+      // bundle's preset filter after its symlink is gone, which breaks the
+      // next boot, so uninstall removes it too.
+      removeGeneratedPatchBlock(patchPath)
+      writeManifestIfChanged(manifestPath, manifest)
     }
     console.log(`${options.dryRun ? '[dry-run] ' : ''}uninstalled ${MAIN_BUNDLE} from profile ${options.profile}`)
+    if (next.length !== bundles.length) console.log(`  removed from dsh.profile.bundles: ${bundles.filter(name => !next.includes(name)).join(', ')}`)
     return
   }
 
@@ -131,7 +230,9 @@ async function main() {
     bundles.push(DISABLE_GOAL_BUNDLE)
   }
 
-  if (!options.dryRun) {
+  if (options.dryRun) {
+    console.log(`[dry-run] would link ${packages.length} packages into ${scopedDir}`)
+  } else {
     await mkdir(scopedDir, { recursive: true })
     for (const entry of packages) {
       const linkPath = join(scopedDir, entry.manifest.name.replace(/^@[^/]+\//u, ''))
@@ -156,17 +257,9 @@ async function main() {
       symlinkSync(entry.dir, linkPath, 'dir')
       console.log(`linked ${entry.manifest.name} -> ${entry.dir}`)
     }
-    if (options.disableBuiltinGoal && existsSync(patchPath)) {
-      const text = readFileSync(patchPath, 'utf8')
-      if (text.includes(BLOCK_BEGIN)) {
-        backup(patchPath)
-        writeFileSync(patchPath, removeGeneratedBlock(text))
-        console.log(`removed a previously generated disable-goal block from ${patchPath}`)
-      }
-    }
-    backup(manifestPath)
+    if (options.disableBuiltinGoal) removeGeneratedPatchBlock(patchPath)
     manifest.dsh.profile.bundles = bundles
-    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+    writeManifestIfChanged(manifestPath, manifest)
   }
 
   console.log(`${options.dryRun ? '[dry-run] ' : ''}enabled ${MAIN_BUNDLE} in profile ${options.profile}`)
@@ -179,22 +272,9 @@ async function main() {
   console.log('Try: /infini-goal <objective>   or ask the model to create an infini goal.')
 }
 
-/** Whether one path is an existing symbolic link. */
-function isSymlink(path) {
-  try {
-    readlinkSync(path)
-    return true
-  } catch {
-    return false
-  }
+try {
+  await main()
+} catch (error) {
+  console.error(`install-profile: ${error instanceof Error ? error.message : String(error)}`)
+  process.exit(1)
 }
-
-/** Keep one timestamped backup before rewriting a file. */
-function backup(path) {
-  const stamp = new Date().toISOString().replaceAll(':', '-')
-  const target = `${path}.bak-infini-goal-${stamp}`
-  copyFileSync(path, target)
-  console.log(`backed up ${path} -> ${target}`)
-}
-
-await main()

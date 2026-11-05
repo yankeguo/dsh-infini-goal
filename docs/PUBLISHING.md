@@ -11,11 +11,12 @@
 | 5 | `@yankeguo/dsh-command-infini-goal` | `/infini-goal` 命令 |
 | 6 | `@yankeguo/dsh-client-ui-infini-goal` | 浏览器状态条 |
 | 7 | `@yankeguo/dsh-infini-goal-bundle` | 安装入口 bundle |
-| 8 | `@yankeguo/dsh-disable-goal-bundle` | 可选伴生 bundle：关闭系统自带 dsh-goal（纯 patch 层，无运行时代码） |
+| 8 | `@yankeguo/dsh-disable-goal-bundle` | 可选伴生 bundle：关闭系统自带 dsh-goal（patch 层 + 小型 `preset-filter` 运行时插件） |
 
 `pnpm publish -r` 会按依赖拓扑自动排序，**功能包先发、主 bundle 最后发布**；
 bundle 的 `workspace:*` 依赖在打包时会被改写为当前精确版本（`0.1.0` 等）。
-`@yankeguo/dsh-disable-goal-bundle` 只含 patch 层，无构建产物也无 workspace 依赖。
+`@yankeguo/dsh-disable-goal-bundle` 没有 workspace 依赖，但含一个小型运行时插件
+（`preset-filter`，构建产物 `lib/preset-filter.js`）与 patch 文件，因此同样需要先 `pnpm build`。
 
 ## 两种发布方式
 
@@ -55,7 +56,7 @@ npm 只接受来自"被信任的 CI 工作流"的 OIDC 发布请求。每个包�
 npm login                                # 确认是 @yankeguo 维护者
 npx npm@latest --version                 # 确保 >= 11.15.0
 scripts/trusted-publishers.sh --dry-run  # 先看会做什么
-scripts/trusted-publishers.sh            # 逐个配置 7 个包
+scripts/trusted-publishers.sh            # 逐个配置全部 8 个包（脚本自动发现）
 scripts/trusted-publishers.sh --list     # 校验结果
 ```
 
@@ -91,7 +92,7 @@ npm trust github @yankeguo/dsh-infini-goal \
 | Environment name | 留空（或与工作流 `environment` 一致） |
 | Allowed actions | 勾选 **npm publish**（按需再加 npm dist-tag） |
 
-7 个包都要各配一次。
+8 个包都要各配一次（脚本会自动遍历 `packages/*/package.json`，新增包无需改脚本）。
 
 ### 校验
 
@@ -111,7 +112,7 @@ git pull
 git status                 # 必须干净
 ```
 
-### 2. 统一升级 7 个包的版本
+### 2. 统一升级 8 个包的版本
 
 所有包使用同一版本号。一行命令改完（示例 `0.2.0`）：
 
@@ -119,7 +120,7 @@ git status                 # 必须干净
 export VERSION=0.2.0
 node -e '
   const fs = require("node:fs")
-  const dirs = ["protocol","infini-goal","driver","tool","command","client-ui","bundle"]
+  const dirs = ["protocol","infini-goal","driver","tool","command","client-ui","bundle","disable-goal-bundle"]
   for (const dir of dirs) {
     const file = `packages/${dir}/package.json`
     const manifest = JSON.parse(fs.readFileSync(file, "utf8"))
@@ -132,7 +133,7 @@ pnpm install                # 同步 workspace 锁文件中的版本
 ```
 
 > 也可以只发布部分包，但**不要**让 bundle 依赖的版本与已发布版本不一致；
-> 推荐整套同版本发布。
+> 推荐整套同版本发布。发布前检查所有包的 `version` 一致（含 `disable-goal-bundle`）。
 
 ### 3. 写 release notes
 
@@ -145,8 +146,11 @@ CI 会用它作为 GitHub Release 正文。
 pnpm install --frozen-lockfile     # 锁文件一致
 pnpm typecheck                     # TS 检查
 pnpm test                          # 单元测试（vitest）
-pnpm build                         # 生成 packages/*/lib（lib 被 gitignore，发布时必须现构建）
+pnpm build                         # 生成 packages/*/lib（lib 被 gitignore，必须现构建；共 9 个 lib/*.js，含 disable-goal-bundle 的 preset-filter.js）
 pnpm release:dry                   # 递归 dry-run：打印 8 个包的发布计划，不上传
+
+# 可选：确认 disable-goal-bundle 的生成 patch 与脚本一致（CI 不跑，发布前手动检查）
+node scripts/build-disable-goal-bundle.mjs --check
 ```
 
 抽查打包内容（可选，但推荐在首次发布或改 `files` 后做）：
@@ -154,8 +158,13 @@ pnpm release:dry                   # 递归 dry-run：打印 8 个包的发布�
 ```sh
 mkdir -p /tmp/infini-pkgs
 pnpm --filter @yankeguo/dsh-infini-goal-bundle pack --pack-destination /tmp/infini-pkgs
-tar -tzf /tmp/infini-pkgs/*.tgz        # 必须包含 package/cordis.patch.yml、README、icon
-tar -xzOf /tmp/infini-pkgs/*.tgz package/package.json   # workspace:* 应已改写为精确版本
+pnpm --filter @yankeguo/dsh-disable-goal-bundle pack --pack-destination /tmp/infini-pkgs
+
+MAIN=/tmp/infini-pkgs/*dsh-infini-goal-bundle-*.tgz
+DISABLE=/tmp/infini-pkgs/*dsh-disable-goal-bundle-*.tgz
+tar -tzf $MAIN        # 必须包含 package/cordis.patch.yml、icon.svg、README.md
+tar -tzf $DISABLE     # 必须包含 package/cordis.patch.yml 与 package/lib/preset-filter.js
+tar -xzOf $MAIN package/package.json   # workspace:* 应已改写为精确版本
 ```
 
 ### 5. 发布
@@ -170,6 +179,8 @@ git tag -a v0.2.0 -m "v0.2.0"
 git push origin v0.2.0                 # 触发 .github/workflows/publish.yml
 ```
 
+CI 在安装依赖前会先跑一个 **tag 一致性门禁**：`v<version>` tag 必须与全部 8 个可发布包和根
+`package.json` 的 `version` 完全一致，否则 job 直接失败（避免 tag / npm 版本错位）。
 工作流需要以下权限（已在 workflow 中声明）：
 
 ```yaml
@@ -181,6 +192,9 @@ permissions:
 pnpm 检测到 GitHub Actions 的 OIDC 环境后会自动完成 token 交换；公开仓库 + 公开包
 会**自动附带 provenance**（无需 `--provenance` 参数）。`workflow_dispatch` 也支持手动触发，
 但不带 tag 时不会创建 Release。
+
+工作流里的第三方 action 使用精确版本（`actions/checkout@v7.0.1`、`pnpm/action-setup@v6.1.1`、
+`actions/setup-node@v7.1.0`），Node 24 + pnpm `12.16.1`。
 
 **B. 本地手动发布（首次发布新包 / 紧急补发）**
 
@@ -231,7 +245,7 @@ dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle@0.2.0
 - 稳定版：默认 `latest`（`pnpm release:publish` / CI 已带 `--tag latest`）。
 - 试验版：加 `--tag next`，例如 `pnpm publish -r --access public --no-git-checks --tag next`；
   用户安装时需要显式指定版本（DSH 插件市场按版本安装，不受 dist-tag 影响）。
-- `engines.dsh` 当前为 `>=0.2.2-rc.1 <0.3.0`；DSH 升级到 0.3 时需更新该范围并回归。
+- `engines.dsh` 当前为 `>=0.2.2-rc.1 <0.3.0`，**8 个包都声明**；DSH 升级到 0.3 时需更新该范围并回归。
 - 破坏性变更：遵循 semver；预发布版本请使用 `-rc.N` / `-alpha.N` 后缀。
 
 ## 常见问题
@@ -244,6 +258,7 @@ dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle@0.2.0
 | `npm trust` 报 2FA / 权限错误 | 账号未开启 2FA，或使用了 "bypass 2FA" 的 Granular Token（不支持）；改用网页或交互登录 |
 | `npm trust` 报 package 不存在 | 先手动发布一次该包（见"前置条件 1"），再配置 trusted publisher |
 | `Cannot publish over the previously published versions` | 版本已存在，不能覆盖；必须升版本（或换 dist-tag 发布新版本） |
+| CI 报 `tag v… expects version …, but: …` | `v*` tag 与包 `version` 不一致；把 8 个包 + 根 `package.json` 统一升到 tag 的版本后重推 tag |
 | 部分包发布失败 | `pnpm publish -r` 会逐个发布；已成功的包会保留。修复后只补发失败包：`pnpm --filter <失败包> publish --access public --no-git-checks`，或整体升 patch 版本 |
 | provenance 未生成 / 报 provenance 错误 | 仓库非公开、runner 非 GitHub-hosted、或使用了 `--no-provenance`；公开仓库 + hosted runner 应自动生成 |
 | 误发版本 | npm 允许 72 小时内 `npm unpublish <pkg>@<version>`；超过则只能废弃（deprecate）并升版本 |

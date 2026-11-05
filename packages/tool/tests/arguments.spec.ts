@@ -55,6 +55,11 @@ describe('parseQuietWindowsArg', () => {
     expect(() => parseQuietWindowsArg('soon')).toThrow(/quiet_windows/)
     expect(() => parseQuietWindowsArg('Mo-Fr 99:00-18:00')).toThrow(InfiniGoalToolInputError)
   })
+
+  it('rejects whitespace-only text instead of silently clearing every window', () => {
+    expect(() => parseQuietWindowsArg('   ')).toThrow(/must not be blank/)
+    expect(() => parseQuietWindowsArg(' \n\t ')).toThrow(InfiniGoalToolInputError)
+  })
 })
 
 describe('resolveTimeZoneArg', () => {
@@ -104,6 +109,17 @@ describe('createRequestFromArgs', () => {
 
   it('rejects an empty objective', () => {
     expect(() => createRequestFromArgs({ objective: '   ' })).toThrow(/objective/)
+  })
+
+  it('rejects a blank quiet_windows override instead of treating it as none', () => {
+    expect(() => createRequestFromArgs({ objective: 'Ship the docs', quiet_windows: '   ' }))
+      .toThrow(/must not be blank/)
+    expect(() => editRequestFromArgs({
+      goal_id: 'g',
+      revision: 1,
+      action: 'config',
+      quiet_windows: ' \n ',
+    }, 'config')).toThrow(/must not be blank/)
   })
 })
 

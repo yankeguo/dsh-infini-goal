@@ -13,8 +13,10 @@ import {
   emptyInfiniGoalFoldState,
   foldInfiniGoal,
   infiniGoalChangeRef,
+  isInfiniGoalChangeEvent,
 } from '../src/fold.ts'
 import { applyInfiniGoalProjection, infiniGoalProjectionDefinition } from '../src/index.ts'
+import { INFINI_GOAL_RECORD_TYPE } from '../src/domain.ts'
 import type {
   InfiniGoalProjectionState,
   InfiniGoalSnapshotChange,
@@ -26,7 +28,9 @@ import {
   clearChange,
   createChange,
   goal,
+  legacyChangeEvent,
   messageEvent,
+  pluginRecordEvent,
   roundEvent,
   snapshotChange,
 } from './fixtures.ts'
@@ -548,6 +552,97 @@ describe('foldInfiniGoal: round admission', () => {
       ...completed,
       roundEvent(2, T0 + 2_000, { revision: 2 }),
     ])).toThrow('is not the next admitted round of the active goal')
+  })
+})
+
+describe('foldInfiniGoal: durable representation compatibility', () => {
+  it('accepts the plugin-record representation the service writes', () => {
+    const folded = fold([
+      changeEvent(0, createChange(T0), T0),
+      roundEvent(1, T0 + 1_000, { round: 1 }),
+      changeEvent(2, snapshotChange('pause', goal({ revision: 2, phase: 'paused' }), {
+        roundsStarted: 1,
+        lastRoundAt: T0 + 1_000,
+        updatedAt: T0 + 2_000,
+      }), T0 + 2_000),
+    ])
+    expect(folded).toMatchObject({
+      goal: { id: 'goal-1', revision: 2, phase: 'paused' },
+      roundsStarted: 1,
+      lastRoundAt: T0 + 1_000,
+      createdAt: T0,
+      updatedAt: T0 + 2_000,
+    })
+    expect(isInfiniGoalChangeEvent(changeEvent(0, createChange(T0), T0))).toBe(true)
+    expect(isInfiniGoalChangeEvent(messageEvent(0, T0, { kind: 'user' }))).toBe(false)
+  })
+
+  it('still replays the retired infini-goal/change event type for live-log continuity', () => {
+    const legacy: SessionEvent[] = [
+      legacyChangeEvent(0, createChange(T0), T0),
+      roundEvent(1, T0 + 1_000, { round: 1 }),
+      legacyChangeEvent(2, snapshotChange('pause', goal({ revision: 2, phase: 'paused' }), {
+        roundsStarted: 1,
+        lastRoundAt: T0 + 1_000,
+        updatedAt: T0 + 2_000,
+      }), T0 + 2_000),
+    ]
+    const current: SessionEvent[] = [
+      changeEvent(0, createChange(T0), T0),
+      roundEvent(1, T0 + 1_000, { round: 1 }),
+      changeEvent(2, snapshotChange('pause', goal({ revision: 2, phase: 'paused' }), {
+        roundsStarted: 1,
+        lastRoundAt: T0 + 1_000,
+        updatedAt: T0 + 2_000,
+      }), T0 + 2_000),
+    ]
+    expect(fold(legacy)).toEqual(fold(current))
+    expect(isInfiniGoalChangeEvent(legacy[0] as SessionEvent)).toBe(true)
+  })
+
+  it('applies a legacy create through the projection unit like a plugin record', () => {
+    const state = applyInfiniGoalProjection(
+      { current: null, seenGoalIds: [], failure: null },
+      legacyChangeEvent(0, createChange(T0), T0),
+    )
+    expect(state.failure).toBeNull()
+    expect(state.current?.goal).toMatchObject({ id: 'goal-1', revision: 1, phase: 'active' })
+    expect(state.seenGoalIds).toEqual(['goal-1'])
+  })
+
+  it('rejects a plugin record whose payload is not an infini-goal change', () => {
+    expect(() => fold([pluginRecordEvent(0, { kind: 'goal/goal', version: 1 })]))
+      .toThrow('has an invalid kind')
+    expect(() => fold([pluginRecordEvent(0, undefined)])).toThrow('has an invalid kind')
+  })
+})
+
+describe('foldInfiniGoal: round event timestamps', () => {
+  it('rejects an unrepresentable round timestamp', () => {
+    for (const time of [-5, 1.5, Number.NaN]) {
+      expect(() => fold([
+        changeEvent(0, createChange(T0), T0),
+        roundEvent(1, time as number, { round: 1 }),
+      ])).toThrow('has an invalid timestamp')
+    }
+  })
+
+  it('accepts a round logged before the create timestamp and keeps its state schema-valid', () => {
+    // A completed goal replaced while the wall clock stepped backwards anchors
+    // the new goal's createdAt at the previous update, so the first round can be
+    // logged earlier. The projection's persisted-state schema must accept it.
+    const state = applyInfiniGoalProjection(
+      { current: null, seenGoalIds: [], failure: null },
+      changeEvent(0, createChange(T0), T0),
+    )
+    const foldedState = applyInfiniGoalProjection(state, roundEvent(1, T0 - 5_000, { round: 1 }))
+    expect(foldedState.failure).toBeNull()
+    expect(foldedState.current?.lastRoundAt).toBe(T0 - 5_000)
+    expect(infiniGoalProjectionDefinition.stateSchema.safeParse(foldedState).success).toBe(true)
+    expect(foldInfiniGoal([
+      changeEvent(0, createChange(T0), T0),
+      roundEvent(1, T0 - 5_000, { round: 1 }),
+    ]).lastRoundAt).toBe(T0 - 5_000)
   })
 })
 

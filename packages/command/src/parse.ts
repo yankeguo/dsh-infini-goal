@@ -19,6 +19,9 @@ export const USAGE =
   'Usage: /infini-goal [<objective>|edit <objective>|pause|resume|complete|block <message>|clear'
   + '|interval <duration>|quiet <windows|none>|timezone <IANA|system>]'
 
+/** Grammar advertised to command-aware clients; the text after `Usage: /infini-goal `. */
+export const COMMAND_GRAMMAR = USAGE.slice('Usage: /infini-goal '.length)
+
 /** Rejected command input with a human-facing explanation. */
 export class CommandInputError extends Error {
   /** Stable failure class local to the command surface. */
@@ -61,13 +64,37 @@ function splitHead(input: string): { readonly head: string; readonly rest: strin
 }
 
 /**
+ * Strip one matching pair of surrounding single or double quotes from one
+ * command argument. Humans naturally wrap multi-word values in quotes (the
+ * README itself shows `/infini-goal quiet "Mo-Fr 09:00-18:00"`), and the
+ * composer passes the text through verbatim, so the quotes are grammar rather
+ * than part of the value.
+ * @param text - trimmed argument text.
+ * @returns the argument without one surrounding quote pair, trimmed again.
+ */
+function unquote(text: string): string {
+  const trimmed = text.trim()
+  if (trimmed.length < 2) return trimmed
+  const first = trimmed[0]
+  const last = trimmed[trimmed.length - 1]
+  const pair = (first === '"' && last === '"') || (first === '\'' && last === '\'')
+  return pair ? trimmed.slice(1, -1).trim() : trimmed
+}
+
+/** Build the invalid-grammar result for one known subcommand with an empty argument. */
+function missingArgument(subcommand: string, explanation: string): InfiniGoalCommand {
+  return invalid(`/infini-goal ${subcommand} requires ${explanation}.`)
+}
+
+/**
  * Parse the `/infini-goal` grammar.
  *
  * A bare keyword selects its control action; `edit`, `block`, `interval`,
  * `quiet`, and `timezone` consume the rest of the line as their argument; any
- * other text is a new objective. In particular, `pause the deployment` is an
- * objective rather than a malformed `pause`, so a human can always create a
- * goal whose text happens to begin with a keyword.
+ * other text is a new objective. Argument values may be wrapped in one pair of
+ * matching quotes. In particular, `pause the deployment` is an objective rather
+ * than a malformed `pause`, so a human can always create a goal whose text
+ * happens to begin with a keyword.
  * @param rawInput - exact text following the command name.
  * @returns the parsed command; malformed known subcommands yield `invalid`.
  */
@@ -86,28 +113,42 @@ export function parseInfiniGoalCommand(rawInput: string): InfiniGoalCommand {
   }
   const { head, rest } = splitHead(input)
   switch (head) {
-    case 'edit':
-      return rest.length === 0
-        ? invalid('Editing the infini-goal requires a replacement objective.')
-        : { kind: 'edit', objective: rest }
-    case 'block':
-      return rest.length === 0
-        ? invalid('Blocking the infini-goal requires a message describing the concrete blocking condition.')
-        : { kind: 'block', message: rest }
-    case 'interval':
-      return rest.length === 0
-        ? invalid('Setting the minimum interval requires a duration such as 90s, 5m, or 1h30m.')
-        : { kind: 'interval', duration: rest }
-    case 'quiet':
-      return rest.length === 0
-        ? invalid('Setting quiet windows requires text such as "Mo-Fr 09:00-18:00" or "none".')
-        : { kind: 'quiet', windows: rest }
-    case 'timezone':
-      return rest.length === 0
-        ? invalid('Setting the time zone requires an IANA name such as Asia/Shanghai, or "system".')
-        : { kind: 'timezone', timezone: rest }
-    default:
-      return { kind: 'create', objective: input }
+    case 'edit': {
+      const objective = unquote(rest)
+      return objective.length === 0
+        ? missingArgument('edit', 'a replacement objective')
+        : { kind: 'edit', objective }
+    }
+    case 'block': {
+      const message = unquote(rest)
+      return message.length === 0
+        ? missingArgument('block', 'a message describing the concrete blocking condition')
+        : { kind: 'block', message }
+    }
+    case 'interval': {
+      const duration = unquote(rest)
+      return duration.length === 0
+        ? missingArgument('interval', 'a duration such as 90s, 5m, or 1h30m')
+        : { kind: 'interval', duration }
+    }
+    case 'quiet': {
+      const windows = unquote(rest)
+      return windows.length === 0
+        ? missingArgument('quiet', 'text such as "Mo-Fr 09:00-18:00" or "none"')
+        : { kind: 'quiet', windows }
+    }
+    case 'timezone': {
+      const timezone = unquote(rest)
+      return timezone.length === 0
+        ? missingArgument('timezone', 'an IANA name such as Asia/Shanghai, or "system"')
+        : { kind: 'timezone', timezone }
+    }
+    default: {
+      const objective = unquote(input)
+      return objective.length === 0
+        ? invalid('The infini-goal objective must not be empty.')
+        : { kind: 'create', objective }
+    }
   }
 }
 

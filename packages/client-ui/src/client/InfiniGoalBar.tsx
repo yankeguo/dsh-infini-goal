@@ -17,7 +17,6 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
 import {
   IconGoalOutlineRegular,
   IconPauseOutlineRegular,
@@ -27,9 +26,7 @@ import {
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { formatQuietWindows } from '@yankeguo/dsh-infini-goal-protocol/client'
 import { describeSchedule, phaseLabelKey } from './format.ts'
-
-/** Settled outcome of one `/infini-goal` command admission. */
-export type InfiniGoalCommandResult = RemoteResult<object | undefined>
+import { commandFailureText, commandSucceeded, type InfiniGoalCommandResult } from './results.ts'
 
 /** Injected business face of the dock entry: command admission bound to this session. */
 export interface InfiniGoalDockInjected {
@@ -51,9 +48,12 @@ const TICK_MS = 1_000
 /**
  * Tick once per second while the strip is visible and counting down.
  * @param enabled - whether a countdown is currently rendered.
+ * @param resetKey - goal identity/schedule key; a change re-reads the clock
+ *   immediately instead of waiting for the next tick (a fresh round or an
+ *   edited interval must not show a stale countdown for up to one second).
  * @returns the latest local instant in epoch milliseconds.
  */
-function useLiveNow(enabled: boolean): number {
+function useLiveNow(enabled: boolean, resetKey: string): number {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (!enabled) return
@@ -64,7 +64,7 @@ function useLiveNow(enabled: boolean): number {
     return () => {
       clearInterval(timer)
     }
-  }, [enabled])
+  }, [enabled, resetKey])
   return now
 }
 
@@ -72,8 +72,11 @@ function useLiveNow(enabled: boolean): number {
 export function InfiniGoalDock({ useProjection, executeCommand, t }: InfiniGoalDockProps) {
   const projection = useProjection('infiniGoal')
   const currentGoal = projection?.goal
-  const visible = currentGoal !== undefined && currentGoal.phase !== 'complete'
-  const now = useLiveNow(visible && currentGoal?.phase === 'active')
+  const active = currentGoal?.phase === 'active'
+  const liveKey = active
+    ? `${currentGoal.id}:${currentGoal.revision}:${projection?.lastRoundAt ?? 0}`
+    : ''
+  const now = useLiveNow(active, liveKey)
 
   const [pending, setPending] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -98,6 +101,12 @@ export function InfiniGoalDock({ useProjection, executeCommand, t }: InfiniGoalD
       const result = await executeCommand(line)
       if (!result.ok) {
         setActionError(t('error.command', { message: result.error.message, code: result.error.code }))
+      } else {
+        // The Remote call can succeed while the command itself settles as a
+        // logical error (no goal, stale revision, invalid settings); that text
+        // must reach the strip instead of being dropped.
+        const rejected = commandFailureText(result)
+        if (rejected !== undefined) setActionError(t('error.rejected', { message: rejected }))
       }
       return result
     } catch (error) {
@@ -114,7 +123,6 @@ export function InfiniGoalDock({ useProjection, executeCommand, t }: InfiniGoalD
   const goal = projection.goal
   if (goal.id === clearedGoalId) return null
 
-  const active = goal.phase === 'active'
   const blockedReason = goal.phase === 'blocked' ? goal.blockedReason?.message : undefined
   const schedule = active ? describeSchedule(projection, now) : null
   // Technical tooltip: the pacing configuration the schedule line follows.
@@ -122,7 +130,10 @@ export function InfiniGoalDock({ useProjection, executeCommand, t }: InfiniGoalD
 
   const clear = (): void => {
     void runCommand('/infini-goal clear').then((result) => {
-      if (result?.ok === true) setClearedGoalId(goal.id)
+      // Only hide the strip when the Host actually cleared the goal: a logical
+      // "no goal"/"stale revision" rejection must keep the bar (and its error)
+      // visible while the projection still reports the goal.
+      if (commandSucceeded(result)) setClearedGoalId(goal.id)
     })
   }
   const pause = (): void => {
@@ -133,7 +144,7 @@ export function InfiniGoalDock({ useProjection, executeCommand, t }: InfiniGoalD
   }
 
   return (
-    <div className="infini-goal-dock" data-infini-goal-bar data-infini-goal-phase={goal.phase}>
+    <div className="infini-goal-dock" data-infini-goal-bar="true" data-infini-goal-phase={goal.phase}>
       <div className="infini-goal-bar" title={blockedReason}>
         <span className="infini-goal-glyph" aria-hidden="true">
           <IconGoalOutlineRegular size={14} />

@@ -76,6 +76,72 @@ describe('planLines', () => {
     ])
   })
 
+  it('renders a quiet-window deferral that reports the quiet end as the next trigger', () => {
+    // Post-contract plan shape: a deferred trigger reports the quiet end as both
+    // nextAt and quietUntil.
+    const current = goal()
+    const deferred: TriggerPlan = {
+      now: NOW,
+      nextAt: NOW + 7_200_000,
+      quietUntil: NOW + 7_200_000,
+      delayMs: 7_200_000,
+      reason: 'quiet-window',
+    }
+    expect(planLines(current, deferred)).toEqual([
+      'Next trigger: 2026-11-05 12:00 (in 2h)',
+      'Automatic rounds are suppressed until 2026-11-05 12:00 (quiet window; time zone Asia/Shanghai).',
+    ])
+  })
+
+  it('explains a quiet-window deferral even when a legacy plan reports the interval reason', () => {
+    // Defensive fallback: a plan whose nextAt is past the interval-satisfying
+    // instant while quietUntil is null must not look like a plain interval wait.
+    const current = goal()
+    const deferred: TriggerPlan = {
+      now: NOW,
+      nextAt: NOW + 7_200_000,
+      quietUntil: null,
+      delayMs: 7_200_000,
+      reason: 'interval',
+    }
+    expect(planLines(current, deferred)).toEqual([
+      'Next trigger: 2026-11-05 12:00 (in 2h)',
+      'Automatic rounds are suppressed until 2026-11-05 12:00 (quiet window; time zone Asia/Shanghai).',
+    ])
+  })
+
+  it('reports a future quiet window through the shared planTrigger contract', () => {
+    // 08:00 Shanghai, quiet window 09:00-18:00, previous round 08:00 with a 2h
+    // minimum interval: the interval-satisfying candidate (10:00) falls inside
+    // the window, so the plan reports quiet-window deferral to 18:00.
+    const now = Date.UTC(2026, 10, 5, 0, 0, 0)
+    const current = goal({
+      lastRoundAt: now,
+      minIntervalMs: 2 * 3_600_000,
+      quietWindows: [{ days: [], start: '09:00', end: '18:00' }],
+    })
+    const plan = planTrigger(current, current.lastRoundAt, now)
+    expect(plan.reason).toBe('quiet-window')
+    expect(plan.nextAt).toBe(Date.UTC(2026, 10, 5, 10, 0, 0))
+    expect(plan.quietUntil).toBe(plan.nextAt)
+    expect(planLines(current, plan)).toEqual([
+      'Next trigger: 2026-11-05 18:00 (in 10h)',
+      'Automatic rounds are suppressed until 2026-11-05 18:00 (quiet window; time zone Asia/Shanghai).',
+    ])
+  })
+
+  it('renders only the trigger line when the minimum interval is binding', () => {
+    const current = goal()
+    const waiting: TriggerPlan = {
+      now: NOW,
+      nextAt: NOW + 240_000,
+      quietUntil: null,
+      delayMs: 240_000,
+      reason: 'interval',
+    }
+    expect(planLines(current, waiting)).toEqual(['Next trigger: 2026-11-05 10:04 (in 4m)'])
+  })
+
   it('renders nothing for a non-active goal', () => {
     expect(planLines(goal({ phase: 'paused' }), undefined)).toEqual([])
     expect(planLines(goal({ phase: 'complete' }), undefined)).toEqual([])

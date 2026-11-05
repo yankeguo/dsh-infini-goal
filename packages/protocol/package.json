@@ -14,6 +14,9 @@
   "files": [
     "lib"
   ],
+  "engines": {
+    "dsh": ">=0.2.2-rc.1 <0.3.0"
+  },
   "peerDependencies": {
     "@deepseek-ai/dsh-session-projection": "0.2.2-rc.1"
   },

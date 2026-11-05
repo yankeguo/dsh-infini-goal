@@ -19,6 +19,7 @@ import type {
   InfiniGoalSnapshot,
   QuietWindow,
 } from '@yankeguo/dsh-infini-goal-protocol'
+import { INFINI_GOAL_RECORD_TYPE } from '../src/domain.ts'
 import type {
   InfiniGoalChange,
   InfiniGoalClearChange,
@@ -101,8 +102,34 @@ export function clearChange(id: string, revision: number, clearedAt: number): In
   }
 }
 
-/** Wrap one change in its committed session event. */
+/**
+ * Wrap one change in its committed plugin-record session event.
+ *
+ * The record representation is what a real Session stores; `ignorable: true`
+ * is the persistence-compat invariant that keeps the log reloadable.
+ */
 export function changeEvent(seq: number, change: InfiniGoalChange, time: number = T0): SessionEvent {
+  return pluginRecordEvent(seq, change, time)
+}
+
+/** Build one plugin-record session event with an arbitrary payload. */
+export function pluginRecordEvent(seq: number, data: unknown, time: number = T0): SessionEvent {
+  return {
+    type: INFINI_GOAL_RECORD_TYPE,
+    seq: SessionSeq(seq),
+    time,
+    data,
+    ignorable: true,
+  } as unknown as SessionEvent
+}
+
+/**
+ * Build one retired `infini-goal/change` session event.
+ *
+ * Only for exercising fold compatibility with in-memory logs written before a
+ * plugin hot-reload; this representation is unreadable from storage.
+ */
+export function legacyChangeEvent(seq: number, change: InfiniGoalChange, time: number = T0): SessionEvent {
   return { type: INFINI_GOAL_EVENT_TYPE, seq: SessionSeq(seq), time, data: change }
 }
 

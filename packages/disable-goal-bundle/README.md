@@ -9,11 +9,15 @@ kind: "package-bundle"
 把 DSH 自带的官方 goal 模式（自动轮次、GoalBar、`/goal` 命令、`get_goal` /
 `create_goal` / `update_goal` 工具）关掉，让无限目标套件成为唯一的目标系统。
 
-它只是一个 **bundle 层**（`cordis.patch.yml`），没有运行时代码：
+它由一层 **bundle patch**（`cordis.patch.yml`）和一个很小的 **`preset-filter` 运行时插件**组成：
 
 - 启用（install / select）→ 官方 goal 模式关闭；
 - 禁用（deselect）→ 官方 goal 模式恢复；
 - profile 的 `cordis.patch.yml` **保持干净**，不再需要粘贴一大段 preset 重写。
+
+运行时插件只在启动时做一件事：读取**已安装的** shipped preset 声明，过滤掉
+`command-goal` / `tool-goal` 后挂载真正的 `@deepseek-ai/dsh-agent-preset`。因此它不是纯数据层，
+但也不会复制任何 preset 子列表。
 
 ## 安装与开关
 
@@ -25,6 +29,8 @@ dsh plugin --profile desktop add @yankeguo/dsh-disable-goal-bundle
 pnpm build
 pnpm install:profile --disable-builtin-goal
 ```
+
+`pnpm build` 会把 `src/preset-filter.js` 逐字节复制为 `lib/preset-filter.js`（运行时资产，不转译），`install-profile.mjs` 会检查它是否存在。
 
 然后在 **Plugins** 页面里勾选/取消 `@yankeguo/dsh-disable-goal-bundle` 即可实时切换
 （HMR 重新组合；preset 变更只影响之后创建的 Agent，彻底生效建议重启一次 DSH）。
@@ -53,7 +59,8 @@ pnpm install:profile --disable-builtin-goal
 
 默认的 bundle patch 是**动态**的：只有 2 个 host 行禁用、3 个 preset 声明禁用和 3 个
 filter 行，不随 DSH 版本变化，**DSH 升级后无需重新生成**。`scripts/build-disable-goal-bundle.mjs`
-只用于重新生成/校验这个静态文件本身（默认输出动态版本、`--check` 检查是否最新）。
+只用于重新生成/校验这个 patch 文件本身（默认输出动态版本、`--check` 检查是否最新；CI 目前
+不运行该校验，发布前建议手动执行）。
 
 如果未来 DSH 改动了 Loader / preset 内部机制导致动态 filter 失效，可用快照回退：
 

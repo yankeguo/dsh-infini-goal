@@ -20,7 +20,12 @@ export interface InfiniGoalToolSchedule {
   readonly nextTriggerAt: number
   /** Milliseconds from the plan's reference instant until {@link nextTriggerAt}. */
   readonly nextTriggerInMs: number
-  /** End of the quiet window containing "now" (epoch milliseconds), or null when not quiet. */
+  /**
+   * End of the quiet period that deferred this trigger (epoch milliseconds), or
+   * null when the minimum interval is the binding constraint. When a quiet
+   * window deferred the round this equals {@link nextTriggerAt}, so the model
+   * can tell a quiet-window wait apart from an interval wait.
+   */
   readonly quietUntil: number | null
 }
 

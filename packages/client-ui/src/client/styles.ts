@@ -155,13 +155,18 @@ export const styles = `
  * Inject the plugin stylesheet once, unless an instance already exists.
  *
  * The returned disposer removes only the tag this call created: a second
- * plugin instance (or a hot reload) leaves the existing tag alone.
+ * plugin instance (or a hot reload) leaves the existing tag alone. When an
+ * existing tag is reused its text is refreshed, so a client-plugin hot update
+ * that changed the stylesheet does not leave the previous CSS in the page.
  * @returns idempotent disposer removing the style tag, if it was created here.
  */
 export function ensureStyleTag(): () => void {
   if (typeof document === 'undefined') return () => {}
   const existing = document.head.querySelector(`style[${STYLE_ATTRIBUTE}="${STYLE_KEY}"]`)
-  if (existing !== null) return () => {}
+  if (existing !== null) {
+    if (existing.textContent !== styles) existing.textContent = styles
+    return () => {}
+  }
   const element = document.createElement('style')
   element.setAttribute(STYLE_ATTRIBUTE, STYLE_KEY)
   element.textContent = styles

@@ -48,6 +48,21 @@ export function settingsHint(): string {
 }
 
 /**
+ * Whether the plan's next trigger lies past the earliest interval-satisfying
+ * instant, which — under the shared pacing policy — can only happen when a
+ * quiet window deferred it. This is a defensive fallback for plans that report
+ * the interval reason while a quiet window is actually the cause; the current
+ * contract already returns `reason === 'quiet-window'` with `quietUntil` set.
+ * @param goal - current goal.
+ * @param plan - live trigger plan.
+ * @returns true when a quiet window, not the interval, pushed the trigger.
+ */
+function deferredByQuietWindow(goal: InfiniGoalView, plan: TriggerPlan): boolean {
+  const intervalEarliest = goal.lastRoundAt === null ? plan.now : goal.lastRoundAt + goal.minIntervalMs
+  return plan.nextAt > Math.max(plan.now, intervalEarliest)
+}
+
+/**
  * Render the pacing lines of one active goal: the next eligible trigger in the
  * goal's local time zone, and the quiet-window waiting state.
  * @param goal - current goal.
@@ -63,9 +78,11 @@ export function planLines(goal: InfiniGoalView, plan: TriggerPlan | undefined): 
       ? `Next trigger: ${nextAt} (ready now)`
       : `Next trigger: ${nextAt} (in ${formatDurationMs(plan.delayMs)})`,
   ]
-  if (plan.quietUntil !== null) {
+  const quietEnd = plan.quietUntil
+    ?? (deferredByQuietWindow(goal, plan) ? plan.nextAt : null)
+  if (quietEnd !== null) {
     lines.push(
-      `Automatic rounds are suppressed until ${formatZonedDateTime(goal.timezone, plan.quietUntil)}`
+      `Automatic rounds are suppressed until ${formatZonedDateTime(goal.timezone, quietEnd)}`
       + ` (quiet window; time zone ${goal.timezone}).`,
     )
   }

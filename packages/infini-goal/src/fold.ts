@@ -2,15 +2,22 @@
  * Pure replay fold and strict decoder for durable infini-goal changes.
  *
  * The fold is the single source of truth for durable goal state: the
- * projection unit replays every committed `infini-goal/change` event and every
+ * projection unit replays every committed infini-goal change record and every
  * admitted `user/message` round through it. Every structural or transition
  * violation raises a plain `Error` with a precise message so the projection
  * captures the first failure and the Host refuses subsequent reads.
+ *
+ * Changes are stored as ignorable `plugin:infini-goal/change` Session records
+ * (the harness's durable channel for out-of-tree plugin state). The fold also
+ * accepts the retired `infini-goal/change` session event type so a plugin
+ * hot-reload keeps replaying a Session whose log already contains the old
+ * representation; that representation is not reloadable from storage.
  *
  * @module @yankeguo/dsh-infini-goal
  */
 
 import type { MessageSource } from '@deepseek-ai/dsh-llm'
+import { pluginRecordOf } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import {
   INFINI_GOAL_CHANGE_VERSION,
@@ -28,6 +35,7 @@ import type {
   InfiniGoalSnapshot,
   QuietWindow,
 } from '@yankeguo/dsh-infini-goal-protocol'
+import { INFINI_GOAL_RECORD_TYPE } from './domain.ts'
 import type {
   FoldedInfiniGoal,
   InfiniGoalChange,
@@ -427,14 +435,38 @@ function infiniGoalSource(source: MessageSource): InfiniGoalMessageSource | unde
 }
 
 /**
+ * Whether one session event carries a durable infini-goal change.
+ *
+ * Accepts both the current plugin-record representation and the retired
+ * `infini-goal/change` event type (in-memory logs written before the plugin
+ * hot-reloaded to the record representation).
+ * @param event - any committed session event.
+ * @returns true when the event is owned by this domain.
+ */
+export function isInfiniGoalChangeEvent(event: SessionEvent): boolean {
+  const record = pluginRecordOf(event)
+  if (record !== undefined) return record.type === INFINI_GOAL_RECORD_TYPE
+  return event.type === INFINI_GOAL_EVENT_TYPE
+}
+
+/**
+ * Extract the untyped change payload of one owned session event.
+ * @param event - event for which {@link isInfiniGoalChangeEvent} returned true.
+ * @returns the payload stored in the plugin record or retired event.
+ */
+function infiniGoalChangePayloadOf(event: SessionEvent): unknown {
+  const record = pluginRecordOf(event)
+  return record === undefined ? event.data : record.data
+}
+
+/**
  * Apply one session event to the strict durable infini-goal fold.
  * @param state - mutable fold accumulator.
  * @param event - next event in sequence order.
  */
 export function applyInfiniGoalEvent(state: InfiniGoalFoldState, event: SessionEvent): void {
-  if (event.type === INFINI_GOAL_EVENT_TYPE) {
-    const change = decodeInfiniGoalChange(event.data)
-    /* v8 ignore next -- the event's declared payload always identifies itself as an infini-goal change. */
+  if (isInfiniGoalChangeEvent(event)) {
+    const change = decodeInfiniGoalChange(infiniGoalChangePayloadOf(event))
     if (change === undefined) throw new Error(`infini-goal change at session event ${event.seq} has an invalid kind`)
     applyInfiniGoalChange(state, change)
     return
@@ -448,6 +480,12 @@ export function applyInfiniGoalEvent(state: InfiniGoalFoldState, event: SessionE
       || source.revision !== current.revision
       || source.round !== state.roundsStarted + 1) {
       throw new Error(`infini-goal round at session event ${event.seq} is not the next admitted round of the active goal`)
+    }
+    // The projection checkpoints `lastRoundAt` as a non-negative integer, so an
+    // unrepresentable event time must fail replay here instead of poisoning the
+    // persisted projection state that cold reads later seed from.
+    if (!Number.isSafeInteger(event.time) || event.time < 0) {
+      throw new Error(`infini-goal round at session event ${event.seq} has an invalid timestamp`)
     }
     if (state.lastRoundAt !== null && event.time < state.lastRoundAt) {
       throw new Error(`infini-goal round at session event ${event.seq} has a non-monotonic timestamp`)
