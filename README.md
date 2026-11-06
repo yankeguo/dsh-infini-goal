@@ -401,4 +401,4 @@ tools/e2e/suite.sh --fresh      # 本插件套件的端到端场景（最小间�
 
 ## License
 
-MIT
+[MIT](LICENSE)
