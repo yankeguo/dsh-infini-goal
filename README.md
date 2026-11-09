@@ -1,403 +1,442 @@
 # dsh-infini-goal
 
-一套面向 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）的插件：
-参考官方 `dsh-goal` 的领域模型、模型工具与 UI 形态，但把"自动续跑"改造成一个
-**无轮次上限、按最小间隔推进、可配置静默时段**的无限目标。
+English | [简体中文](README.zh.md)
 
-- **没有最大轮次**：目标保持 `active` 直到被完成、暂停、阻塞或清除；
-- **最小触发间隔**：两次自动轮次的开始时间至少相隔 `minIntervalMs`，空循环不会疯狂重试；
-- **静默时段**（`quietWindows`）：配置的本地时间段内不自动触发；人类对话与工具调用照常工作，
-  时段结束后自动继续。可用于免打扰、专注时段、非工作时段、夜间等任意场景。
+A plugin suite for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH):
+it takes the domain model, model tools, and UI shape of the official `dsh-goal`, but reworks
+"automatic continuation" into an **endless goal with no round cap, paced by a minimum interval,
+and configurable quiet windows**.
 
-文档导航：[设计说明](docs/DESIGN.md) · [发布指南](docs/PUBLISHING.md) ·
-[关闭系统自带的 dsh-goal](docs/DISABLE-BUILTIN-GOAL.md) ·
-[E2E 验证工具](tools/e2e/README.md) · [v0.1.0 release notes](docs/releases/v0.1.0.md)
+- **No maximum rounds**: a goal stays `active` until it is completed, paused, blocked, or cleared;
+- **Minimum trigger interval**: two automatic rounds start at least `minIntervalMs` apart, so an
+  empty loop cannot spin into rapid retries;
+- **Quiet windows** (`quietWindows`): no automatic triggers inside the configured local time
+  ranges; human conversation and tool calls keep working as usual, and automatic progress resumes
+  when the window ends. Use them for do-not-disturb, focus time, off-hours, nights, or anything else.
 
-## 特性
+Docs: [Design](docs/DESIGN.md) · [Publishing guide](docs/PUBLISHING.md) ·
+[Disabling the built-in dsh-goal](docs/DISABLE-BUILTIN-GOAL.md) ·
+[E2E verification tools](tools/e2e/README.md) · [v0.1.0 release notes](docs/releases/v0.1.0.md)
 
-| 能力 | 说明 |
+## Features
+
+| Capability | Description |
 | --- | --- |
-| 无限续跑 | 无 `maxGoalRounds`；`roundsStarted` 只增不减，可以一直跑下去 |
-| 最小触发间隔 | 每轮自动触发至少间隔可配置时长（默认 1 分钟，最小 1 秒，最大 30 天），专门抑制空循环 |
-| 静默时段 | 支持跨午夜、按 ISO 星期过滤、IANA 时区；时段内不触发自动轮次 |
-| 事件溯源 | 所有变更以可忽略的 `plugin:infini-goal/change` Session 插件记录持久化，严格回放校验，可 resume / fork |
-| Session projection | `infiniGoal` projection 把当前目标同步到浏览器，UI 无需自定义 Remote API |
-| 模型工具 | `get_infini_goal` / `create_infini_goal` / `update_infini_goal` |
-| 人类命令 | `/infini-goal`，可在不消耗模型轮次的情况下查看状态、配置节奏、暂停/恢复 |
-| 状态条 UI | composer 上方的 InfiniGoalBar：阶段、轮次、触发节奏、静默时段提示、暂停/恢复/清除 |
-| 权限模型 | 所有变更都需要人类授权或当前自动轮次授权，模型无法自说自话改目标（见[权限模型](#权限模型)） |
-| 可共存 | 与官方 `dsh-goal` 的工具、命令、状态条互不同名；也可用伴生 bundle 关掉官方 goal |
+| Endless continuation | No `maxGoalRounds`; `roundsStarted` only grows, so a goal can run indefinitely |
+| Minimum trigger interval | Each automatic round starts at least the configured duration after the previous one (default 1 minute, minimum 1 second, maximum 30 days), specifically to suppress empty loops |
+| Quiet windows | Supports midnight crossing, ISO weekday filters, and IANA time zones; no automatic rounds inside a window |
+| Event sourcing | Every change is persisted as an ignorable `plugin:infini-goal/change` Session plugin record with strict replay validation; goals can be resumed and forked |
+| Session projection | The `infiniGoal` projection syncs the current goal to the browser, so the UI needs no custom Remote API |
+| Model tools | `get_infini_goal` / `create_infini_goal` / `update_infini_goal` |
+| Human command | `/infini-goal` — inspect status, configure pacing, pause/resume without spending model rounds |
+| Status-bar UI | InfiniGoalBar above the composer: phase, rounds, trigger pacing, quiet-window hint, pause/resume/clear |
+| Permission model | Every change needs human authorization or the current automatic round's authorization; the model cannot rewrite the goal on its own (see [Permission model](#permission-model)) |
+| Coexistence | Tool, command, and status-bar names do not collide with the official `dsh-goal`; a companion bundle can also switch the official goal off |
 
-## 界面
+## UI
 
-状态条固定在 composer 上方，与官方 goal 的 GoalBar 同槽位（`conversation.input.dock`）：
+The status bar sits above the composer, in the same slot as the official goal's GoalBar
+(`conversation.input.dock`):
 
-| 自动推进中（显示轮次与节奏） | 静默时段（不自动触发） |
+| Auto-continuing (rounds and pacing) | Quiet window (no automatic trigger) |
 | --- | --- |
-| ![自动推进中](docs/screenshots/infini-goal-active.jpg) | ![静默时段](docs/screenshots/infini-goal-waiting.jpg) |
+| ![Auto-continuing](docs/screenshots/infini-goal-active.jpg) | ![Quiet window](docs/screenshots/infini-goal-waiting.jpg) |
 
-状态条各状态（左侧为阶段标签，中间为 objective 与轮次，右侧为节奏行和按钮）：
+Status-bar states (phase label on the left, objective and rounds in the middle, pacing row and
+buttons on the right):
 
-| 目标状态 | 状态条显示 | 按钮 |
+| Goal state | Status bar shows | Buttons |
 | --- | --- | --- |
-| `active`，距上一轮已满最小间隔 | 自动推进中 · objective · 轮次 N · `下一轮 mm:ss`（每秒刷新） | 暂停 / 清除 |
-| `active`，最小间隔尚未到 | 自动推进中 · objective · 轮次 N · `最小间隔 1m` | 暂停 / 清除 |
-| `active`，当前处于静默时段 | 自动推进中 · objective · 轮次 N · `静默时段 · 至 HH:mm` | 暂停 / 清除 |
-| `paused` / `blocked` | 已暂停 / 已阻塞（blocked 附原因）· 轮次 N，不显示节奏行 | 恢复 / 清除 |
-| `complete` 或无目标 | 不渲染 | — |
+| `active`, minimum interval elapsed since the last round | Auto-continuing · objective · Rounds: N · `next round in mm:ss` (refreshed every second) | Pause / Clear |
+| `active`, minimum interval not reached yet | Auto-continuing · objective · Rounds: N · `min interval 1m` | Pause / Clear |
+| `active`, inside a quiet window | Auto-continuing · objective · Rounds: N · `quiet window · until HH:mm` | Pause / Clear |
+| `paused` / `blocked` | Paused / Blocked (blocked also shows the reason) · Rounds: N; no pacing row | Resume / Clear |
+| `complete` or no goal | Nothing rendered | — |
 
-按钮只发送 `/infini-goal ...` 命令，不引入自定义 Remote API；故障时状态条内联显示命令错误。
+The buttons only dispatch `/infini-goal ...` commands; no custom Remote API is involved. Command
+errors are shown inline in the status bar.
 
-## 与官方 dsh-goal 的差异
+## Differences from the official dsh-goal
 
-| 维度 | 官方 `dsh-goal` | 本插件 |
+| Dimension | Official `dsh-goal` | This plugin |
 | --- | --- | --- |
-| 轮次上限 | `maxGoalRounds`（默认 256） | 无上限 |
-| 触发节流 | 无，空闲立即续跑 | 最小触发间隔 + 静默时段 |
-| 激活模型 | 进程内 `armed`/`disarmed`，恢复/派生后需人工 resume | 持久化 `phase`：应用重启、会话恢复后继续（可配置 `autoContinueOnStart: false`，此时启动时持久化为 paused） |
-| 工具/命令 | `get_goal` / `create_goal` / `update_goal`，`/goal` | `*_infini_goal`，`/infini-goal`，可与官方 goal 共存 |
-| 远程 API | Typert Remote | 不需要：UI 读 Session projection，操作经 `/infini-goal` 命令 |
+| Round cap | `maxGoalRounds` (default 256) | No cap |
+| Trigger throttling | None; resumes immediately when idle | Minimum trigger interval + quiet windows |
+| Activation model | In-process `armed`/`disarmed`; needs a manual resume after restore or fork | Durable `phase`: continues after an app restart or session restore (configurable `autoContinueOnStart: false`, which persists the goal as paused at startup) |
+| Tools / commands | `get_goal` / `create_goal` / `update_goal`, `/goal` | `*_infini_goal`, `/infini-goal`; coexists with the official goal |
+| Remote API | Typert Remote | Not needed: the UI reads a Session projection and actions go through the `/infini-goal` command |
 
-## 包结构
+## Package layout
 
 ```
 packages/
-  protocol/    @yankeguo/dsh-infini-goal-protocol   纯类型 + 间隔/时区/静默时段数学（host 与浏览器共用）
-  infini-goal/ @yankeguo/dsh-infini-goal            核心服务 ctx.infiniGoals + 严格回放 fold + projection
-  driver/      @yankeguo/dsh-infini-goal-driver     自动续跑驱动器（最小间隔 / 静默时段）
-  tool/        @yankeguo/dsh-tool-infini-goal       模型工具
-  command/     @yankeguo/dsh-command-infini-goal    /infini-goal 人类命令
-  client-ui/   @yankeguo/dsh-client-ui-infini-goal  浏览器状态条
-  bundle/      @yankeguo/dsh-infini-goal-bundle     bundle：cordis.patch.yml + 依赖
-  disable-goal-bundle/  @yankeguo/dsh-disable-goal-bundle  可选伴生 bundle：关闭系统自带 dsh-goal
+  protocol/    @yankeguo/dsh-infini-goal-protocol   pure types + interval/time-zone/quiet-window math (shared by host and browser)
+  infini-goal/ @yankeguo/dsh-infini-goal            core service ctx.infiniGoals + strict replay fold + projection
+  driver/      @yankeguo/dsh-infini-goal-driver     automatic-continuation driver (minimum interval / quiet windows)
+  tool/        @yankeguo/dsh-tool-infini-goal       model tools
+  command/     @yankeguo/dsh-command-infini-goal    the /infini-goal human command
+  client-ui/   @yankeguo/dsh-client-ui-infini-goal  browser status bar
+  bundle/      @yankeguo/dsh-infini-goal-bundle     bundle: cordis.patch.yml + dependencies
+  disable-goal-bundle/  @yankeguo/dsh-disable-goal-bundle  optional companion bundle: switches the built-in dsh-goal off
 ```
 
-`pnpm build` 产出 9 个 `lib/*.js`：protocol 的 `index`/`client`、core、driver、tool、command、
-client-ui 的 `index`/`client`，以及 `disable-goal-bundle` 的运行时资产 `preset-filter.js`；
-`bundle` 包只有 patch 文件，不产出 JS。构建用 esbuild：host 入口把 `@deepseek-ai/*`、
-`@yankeguo/*` 与 `node:*` 保持为外部依赖——工作区包互相外置，确保整个进程共享同一份
-protocol/core 实例——其余依赖（例如 core 内联的 `zod`）打进产物；`preset-filter.js` 是
-逐字节复制的运行时资产，不做转译。
+`pnpm build` produces 9 `lib/*.js` files: protocol's `index`/`client`, core, driver, tool, command,
+client-ui's `index`/`client`, plus the `disable-goal-bundle` runtime asset `preset-filter.js`;
+the `bundle` package only contains patch files and emits no JS. The build uses esbuild: host entries
+keep `@deepseek-ai/*`, `@yankeguo/*`, and `node:*` as external dependencies — workspace packages are
+externalized so the whole process shares one instance of protocol/core — while other dependencies
+(for example, the `zod` inlined into core) are bundled. `preset-filter.js` is a byte-for-byte copied
+runtime asset and is not transpiled.
 
-## 快速开始
+## Quick start
 
-### 前置条件
+### Prerequisites
 
-| 项 | 要求 |
+| Item | Requirement |
 | --- | --- |
-| DSH | `0.2.2-rc.1`（插件 / bundle 包声明 `engines.dsh: >=0.2.2-rc.1 <0.3.0`） |
-| Node.js | ≥ 24.9（仅本地构建 / 发布 / E2E 需要；从 npm 安装插件不需要本机 Node） |
-| pnpm | 12.x（CI 固定 `pnpm@12.16.1`） |
-| Web UI | DSH 桌面端或 `dsh web`；状态条只在 Web 端渲染 |
+| DSH | `0.2.2-rc.1` (plugin / bundle packages declare `engines.dsh: >=0.2.2-rc.1 <0.3.0`) |
+| Node.js | ≥ 24.9 (only needed for local build / publish / E2E; installing the plugin from npm does not need Node on this machine) |
+| pnpm | 12.x (CI pins `pnpm@12.16.1`) |
+| Web UI | DSH desktop app or `dsh web`; the status bar only renders in the Web UI |
 
-### 安装：从 npm（发布后，推荐）
+### Install from npm (after publishing; recommended)
 
 ```sh
-# 主 bundle：核心服务 + 驱动器 + 模型工具 + 命令 + 状态条
+# Main bundle: core service + driver + model tools + command + status bar
 dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle
 
-# 可选伴生 bundle：关闭系统自带的 dsh-goal
+# Optional companion bundle: switches the built-in dsh-goal off
 dsh plugin --profile desktop add @yankeguo/dsh-disable-goal-bundle
 ```
 
-安装后在 **Plugins** 页面确认对应 bundle 已启用（新安装的 bundle 通常默认启用；
-若显示为未启用，勾选即可），然后刷新 Web 页面。进阶用法也可以单独安装某个插件包，并在
-profile 的 `cordis.patch.yml` 里自行插入对应的 loader row；日常使用推荐直接装主 bundle。
+After installing, confirm on the **Plugins** page that the bundle is enabled (newly installed
+bundles are usually enabled by default; if it shows as disabled, tick it), then refresh the Web page.
+For advanced setups you can also install individual plugin packages and insert their loader rows
+into the profile's `cordis.patch.yml` yourself; for everyday use, install the main bundle.
 
-### 安装：本地 checkout（开发 / 验收）
+### Install from a local checkout (development / acceptance)
 
 ```sh
 pnpm install
 pnpm build
-pnpm install:profile                  # 默认 --profile desktop
-# 或指定 profile / home；--disable-builtin-goal 同时关闭官方 goal
+pnpm install:profile                  # defaults to --profile desktop
+# or specify a profile / home; --disable-builtin-goal also switches the official goal off
 node scripts/install-profile.mjs --profile desktop --dsh-home ~/.dsh
 pnpm install:profile --disable-builtin-goal
 ```
 
-脚本做三件事：
+The script does three things:
 
-1. 把全部 8 个 workspace 包（6 个插件包 + 2 个 bundle 包）符号链接到
-   `$DSH_HOME/profiles/<profile>/node_modules/@yankeguo/`；
-2. 把 `@yankeguo/dsh-infini-goal-bundle` 追加进 profile 的 `dsh.profile.bundles`
-   （带 `--disable-builtin-goal` 时再追加伴生 bundle，并清掉旧脚本写进 profile patch 的同功能块）；
-3. 写入前备份 profile 的 `package.json`（有改动时）。
+1. symlinks all 8 workspace packages (6 plugin packages + 2 bundle packages) into
+   `$DSH_HOME/profiles/<profile>/node_modules/@yankeguo/`;
+2. appends `@yankeguo/dsh-infini-goal-bundle` to the profile's `dsh.profile.bundles`
+   (with `--disable-builtin-goal` it also appends the companion bundle and clears the same-purpose
+   block that older scripts wrote into the profile patch);
+3. backs up the profile's `package.json` before writing (when there are changes).
 
-DSH 的 profile HMR 会实时加载 Host 插件；浏览器侧刷新页面后出现状态条。
-卸载：`pnpm uninstall:profile`。
+DSH's profile HMR loads host plugins live; the status bar appears after refreshing the browser page.
+Uninstall: `pnpm uninstall:profile`.
 
-### 升级 / 卸载
+### Upgrade / uninstall
 
 ```sh
-# 升级到指定版本（发布到 npm 后）
+# Upgrade to a specific version (after publishing to npm)
 dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle@0.2.0
 
-# 卸载（DSH 下次加载 profile 时会清理已移除 bundle 的选择）
+# Uninstall (DSH clears the selection of removed bundles the next time it loads the profile)
 dsh plugin --profile desktop remove @yankeguo/dsh-infini-goal-bundle
 dsh plugin --profile desktop remove @yankeguo/dsh-disable-goal-bundle
 
-# 本地 checkout
-pnpm install:profile                  # 先 pnpm build，再重新链接即生效
-pnpm uninstall:profile                # 移除链接与 bundle 选择
+# Local checkout
+pnpm install:profile                  # run pnpm build first; re-linking applies the change
+pnpm uninstall:profile                # remove the links and bundle selection
 ```
 
-升级 DSH 大版本（0.3）前需要更新插件 / bundle 包的 `engines.dsh` 并回归；不兼容的 bundle 会被 DSH 跳过。
+Before upgrading DSH across a major version (0.3), update the plugins' / bundles' `engines.dsh` and
+regression-test; incompatible bundles are skipped by DSH.
 
-### 从 0.1.0 升级 / 修复旧会话
+### Upgrading from 0.1.0 / repairing old sessions
 
-0.1.0 把目标变更写成了自定义 Session 事件 `infini-goal/change`。DSH 0.2.2-rc.1 的持久化读取
-只接受它自己词表内的 event type（或带 `ignorable` 标记的插件记录），所以**用 0.1.0 写过目标的
-Session 重启后会拒绝被解释**（报 "refusing to interpret the log — it was likely written by a
-newer harness"）。当前版本改用可忽略的 `plugin:infini-goal/change` 记录，但**不会自动迁移**
-0.1.0 的旧日志；需要时用仓库脚本一次性修复：
+0.1.0 wrote goal changes as a custom Session event `infini-goal/change`. DSH 0.2.2-rc.1's durable
+reader only accepts event types from its own vocabulary (or plugin records marked `ignorable`), so a
+**Session whose goals were written by 0.1.0 is refused interpretation after a restart** (it reports
+"refusing to interpret the log — it was likely written by a newer harness"). The current version
+stores changes as ignorable `plugin:infini-goal/change` records, but **does not migrate** old 0.1.0
+logs automatically; when needed, repair them once with the repository script:
 
 ```sh
-# 先退出所有可能写这些 Session 的 DSH 实例；默认 dry-run，只打印报告
+# Quit every DSH instance that could write these Sessions first; dry-run is the default and only prints a report
 node scripts/repair-session-log.mjs --dry-run --dsh-home ~/.dsh
 
-# 确认报告（例如 "DRY-RUN ... rewrote 7 row(s)"）后再写入
+# After confirming the report (e.g. "DRY-RUN ... rewrote 7 row(s)"), write the result
 node scripts/repair-session-log.mjs --write --dsh-home ~/.dsh
 ```
 
-脚本只把 `infini-goal/change` 行改写为 `plugin:infini-goal/change` + `ignorable: true`，其余
-行与字节保持不变；写入前在旁边保留带时间戳的 `*.bak-repair-*` 备份；默认拒绝修复仍带
-`session.lock` 的 Session（确认属主进程已退出时可加 `--force`）；重复执行是幂等的。
-要求 Node.js ≥ 24.9 且已 `pnpm install`；也可以用 `--write <session-dir|log-file>...`
-只修复指定日志。
+The script only rewrites `infini-goal/change` rows into `plugin:infini-goal/change` + `ignorable: true`;
+all other rows and bytes stay untouched. It keeps a timestamped `*.bak-repair-*` backup next to the
+log before writing, refuses by default to repair Sessions still holding a `session.lock` (add
+`--force` once the owning process has exited), and is idempotent. It requires Node.js ≥ 24.9 and a
+completed `pnpm install`; you can also repair only the given logs with
+`--write <session-dir|log-file>...`.
 
-### 使用
+### Usage
 
 ```
-/infini-goal 修完所有 failed 的文档校验并保持 CI 绿色   # 创建目标
-/infini-goal                                          # 查看状态与下一次触发时间
-/infini-goal status                                   # 上一条的显式别名
-/infini-goal interval 10m                             # 最小触发间隔改成 10 分钟
-/infini-goal quiet "Mo-Fr 09:00-18:00"                # 示例：该时段不自动触发
-/infini-goal quiet none                               # 取消静默时段
-/infini-goal timezone Asia/Shanghai                   # 设置静默时段时区（system 用本机时区）
+/infini-goal Fix all failing doc checks and keep CI green   # create a goal
+/infini-goal                                          # show status and the next trigger time
+/infini-goal status                                   # explicit alias of the previous form
+/infini-goal interval 10m                             # change the minimum trigger interval to 10 minutes
+/infini-goal quiet "Mo-Fr 09:00-18:00"                # example: no automatic triggers in that window
+/infini-goal quiet none                               # clear the quiet windows
+/infini-goal timezone Asia/Shanghai                   # set the quiet-window time zone (system = host zone)
 /infini-goal pause | resume | complete | clear
-/infini-goal block 供应商配额耗尽                       # 标记阻塞
-/infini-goal edit <新目标>
+/infini-goal block vendor quota exhausted             # mark the goal blocked
+/infini-goal edit <new objective>
 ```
 
-也可以直接让模型创建目标：当人类请求是一个长期目标时，模型会调用 `create_infini_goal`
-（需要当前轮次里有直接的人类消息）。目标 `complete` 之后再执行 `/infini-goal edit <新目标>`
-会创建一个新目标，而不是修改已完成的目标。命令参数支持成对引号（如
-`/infini-goal quiet "Mo-Fr 09:00-18:00"` 中的引号会被剥掉一层，不会进入参数值）；
-`interval` / `quiet` / `timezone` 在目标已 `complete` 时会被拒绝，需要先创建新目标。
+You can also let the model create a goal: when a human request is a long-running objective, the
+model calls `create_infini_goal` (this requires a direct human message in the current round). After
+a goal is `complete`, running `/infini-goal edit <new objective>` creates a new goal instead of
+modifying the completed one. Command arguments support paired quotes (e.g. the quotes around
+`"Mo-Fr 09:00-18:00"` in `/infini-goal quiet "Mo-Fr 09:00-18:00"` are stripped and never become part
+of the value); `interval` / `quiet` / `timezone` are rejected while the goal is `complete` — create a
+new goal first.
 
-## 配置
+## Configuration
 
-部署级配置写在加载该插件的 profile patch 行里（bundle 已经给出默认值；要改就在 profile 的
-`cordis.patch.yml` 里按 loader row id 覆盖 `config`，注意 DSH 的 patch 对该行 config 是整体替换）。
+Deployment-level configuration goes into the profile patch row that loads the plugin (the bundle
+ships defaults; to change them, override `config` in the profile's `cordis.patch.yml` by loader row
+id — note that DSH patches replace the row's config wholesale).
 
-### 部署默认值（核心服务）
+### Deployment defaults (core service)
 
 ```yaml
 - id: infini-goal
   name: '@yankeguo/dsh-infini-goal'
   config:
-    defaultMinIntervalMs: 60000        # 默认最小触发间隔
-    defaultQuietWindows: []            # 默认静默时段，元素 { days: [1..7], start: 'HH:mm', end: 'HH:mm' }
-    timezone: Asia/Shanghai            # 默认静默时区；缺省取宿主系统时区
+    defaultMinIntervalMs: 60000        # default minimum trigger interval
+    defaultQuietWindows: []            # default quiet windows; elements are { days: [1..7], start: 'HH:mm', end: 'HH:mm' }
+    timezone: Asia/Shanghai            # default quiet-window time zone; falls back to the host system zone
 ```
 
-| 键 | 默认 | 范围 / 说明 |
+| Key | Default | Range / notes |
 | --- | --- | --- |
-| `defaultMinIntervalMs` | `60000` | `1000` ~ `2592000000`（1s ~ 30d），整数毫秒 |
-| `defaultQuietWindows` | `[]` | 每个元素 `{ days, start, end }`；创建时校验语法与可调度性 |
-| `timezone` | 宿主系统时区 | IANA 名称，缺省取 `Intl` 解析的系统时区 |
+| `defaultMinIntervalMs` | `60000` | `1000` – `2592000000` (1s – 30d), integer milliseconds |
+| `defaultQuietWindows` | `[]` | each element is `{ days, start, end }`; syntax and schedulability are validated at creation time |
+| `timezone` | host system zone | IANA name; defaults to the system zone resolved via `Intl` |
 
-### 驱动器
+### Driver
 
 ```yaml
 - id: infini-goal-driver
   name: '@yankeguo/dsh-infini-goal-driver'
   config:
-    autoContinueOnStart: true          # 插件加载 / Agent 创建时是否自动继续 active 目标
-    pollFloorMs: 1000                  # agent 暂不空闲 / 有竞争输入时的安全轮询间隔
+    autoContinueOnStart: true          # whether to auto-continue active goals when the plugin loads / the agent is created
+    pollFloorMs: 1000                  # safety polling interval while the agent is busy or competing input exists
 ```
 
-| 键 | 默认 | 说明 |
+| Key | Default | Notes |
 | --- | --- | --- |
-| `autoContinueOnStart` | `true` | `false` 时，启动时把已有 `active` 目标**持久化 pause**（写入 pause 事件），等待人类 `/infini-goal resume` |
-| `pollFloorMs` | `1000` | 整数，最小 `100`；agent 暂时不可驱动时的重试间隔 |
+| `autoContinueOnStart` | `true` | when `false`, existing `active` goals are **durably paused** at startup (a pause event is written) and wait for a human `/infini-goal resume` |
+| `pollFloorMs` | `1000` | integer, minimum `100`; retry interval while the agent cannot be driven |
 
-### 模型工具策略
+### Model-tool policy
 
 ```yaml
 - id: infini-goal-tool
   name: '@yankeguo/dsh-tool-infini-goal'
   config:
-    blockedAfterConsecutiveRounds: 3   # 自动轮次中，模型报告 blocked 前的最少轮次
+    blockedAfterConsecutiveRounds: 3   # minimum rounds before the model may report blocked in automatic rounds
 ```
 
-| 键 | 默认 | 说明 |
+| Key | Default | Notes |
 | --- | --- | --- |
-| `blockedAfterConsecutiveRounds` | `3` | 正整数；只在“当前自动轮次”授权下生效，人类直接 block 不受此限（详见[权限模型](#权限模型)） |
+| `blockedAfterConsecutiveRounds` | `3` | positive integer; applies only under "current automatic round" authorization, a direct human block is not limited by it (see [Permission model](#permission-model)) |
 
-bundle 里的工具行没有显式写这项配置，等价于使用默认值 `3`。
+The bundle's tool row does not set this option explicitly, which is equivalent to the default `3`.
 
-### 目标级覆盖
+### Per-goal overrides
 
 `create_infini_goal` / `/infini-goal interval` / `/infini-goal quiet` / `/infini-goal timezone`
-写入的是每个目标自己的持久化设置，优先于部署默认值；`/infini-goal` 状态与状态条展示的也是
-目标级设置。
+write each goal's own durable settings, which take precedence over deployment defaults; the
+`/infini-goal` status output and the status bar also display the per-goal settings.
 
-### 语法
+### Syntax
 
-- **时长**：`500ms`、`90s`、`5m`、`1h30m`、`2d`，可组合；作为最小触发间隔时必须在
-  `1s` ~ `30d` 之间。
-- **静默时段**：分号分隔多条，每条 `[days ]HH:mm-HH:mm`，例如
-  `Mo-Fr 09:00-18:00; Sa-Su 10:00-12:00; 22:00-06:00`。
-  - `days` 为空 = 每天；ISO 星期 1=周一 … 7=周日，支持 `Mo-Fr`、`Sa,Su`、`1-5`；
-    `daily` / `everyday` / `*` 等价于每天；
-  - 窗口的 `start` 含、`end` 不含；`end < start` 表示跨午夜（如 `22:00-06:00`），
-    `start == end` 会被拒绝；
-  - `days` 过滤的是窗口**开始日**，例如 `Sa-Su 22:00-06:00` 覆盖周六 22:00→周日 06:00
-    与周日 22:00→周一 06:00；
-  - 多条窗口取并集；时区由 `timezone` 决定，跨夏令时按本地墙钟时间推进；
-  - `none` / `off` / 空文本表示没有静默时段；`always` / `all` 会被拒绝；
-  - 若静默时段覆盖全部本地时间（永远无法触发自动轮次），配置会被拒绝。
+- **Durations**: `500ms`, `90s`, `5m`, `1h30m`, `2d`, composable; as a minimum trigger interval it must
+  be between `1s` and `30d`.
+- **Quiet windows**: semicolon-separated; each entry is `[days ]HH:mm-HH:mm`, e.g.
+  `Mo-Fr 09:00-18:00; Sa-Su 10:00-12:00; 22:00-06:00`.
+  - empty `days` = every day; ISO weekdays 1=Monday … 7=Sunday, supporting `Mo-Fr`, `Sa,Su`, `1-5`;
+    `daily` / `everyday` / `*` all mean every day;
+  - a window's `start` is included and `end` excluded; `end < start` means crossing midnight (e.g.
+    `22:00-06:00`); `start == end` is rejected;
+  - `days` filters the **starting day** of the window, e.g. `Sa-Su 22:00-06:00` covers Saturday
+    22:00→Sunday 06:00 and Sunday 22:00→Monday 06:00;
+  - multiple windows form a union; the time zone comes from `timezone`, and windows advance by local
+    wall-clock time across DST transitions;
+  - `none` / `off` / empty text means no quiet windows; `always` / `all` are rejected;
+  - a configuration whose windows cover all local time (automatic rounds could never trigger) is rejected.
 
-## 行为细节
+## Behavior details
 
-- **节奏**：`nextAt = max(now, lastRoundAt + minIntervalMs)`（首轮不受间隔限制，创建后按
-  agent 空闲与静默时段尽快触发）；若落在静默时段内，则推进到该时段结束（可连续推进），
-  直到不落在任何静默时段。`planTrigger` 的 `quietUntil` 只在静默延后触发时非 `null`，且
-  等于 `nextAt`；UI 的 `静默时段 · 至 HH:mm` 与命令输出都用它判断静默等待。
-- **空循环**：每轮都是一次正常 turn；轮次间隔由最小触发间隔保证，不会出现"秒回秒触发"。
-- **人类优先**：人类消息、其它工具调用照常进行；有竞争输入时驱动器会让路，等 agent 空闲
-  且节奏满足后再注入下一轮。
-- **持久化检查点**：每轮注入前驱动器会 flush 当前 Session 日志，保证下一轮看到的是已落盘的
-  历史（flush 失败时记录日志并轮询重试）。
-- **静默时间只限制自动触发**：`/infini-goal` 状态、人类对话、工具调用不受影响。
+- **Pacing**: `nextAt = max(now, lastRoundAt + minIntervalMs)` (the first round is not limited by the
+  interval; it triggers as soon as the agent is idle and no quiet window applies); if the target
+  falls inside a quiet window, it is pushed to the end of that window (possibly repeatedly) until it
+  no longer falls inside any window. `planTrigger`'s `quietUntil` is non-`null` only when a quiet
+  window deferred the trigger, and equals `nextAt`; the UI's `quiet window · until HH:mm` and the
+  command output both use it to detect a quiet-window wait.
+- **Empty loops**: every round is a normal turn; rounds are spaced by the minimum trigger interval,
+  so a "reply-then-trigger-immediately" burst cannot occur.
+- **Humans first**: human messages and other tool calls proceed as usual; when competing input
+  exists the driver yields and injects the next round only once the agent is idle and pacing allows.
+- **Durable checkpoint**: before injecting each round, the driver flushes the current Session log so
+  the next round sees history that is already on disk (on a failed flush it logs and retries by polling).
+- **Quiet time only gates automatic triggers**: `/infini-goal` status, human conversation, and tool
+  calls are unaffected.
 
-### 自动轮次失败处理
+### Automatic-round failure handling
 
-自动轮次失败会 `block` 目标，`blockedReason.code` 如下：
+A failed automatic round `block`s the goal; `blockedReason.code` is one of:
 
-| code | 触发条件 |
+| code | Trigger condition |
 | --- | --- |
-| `max-tokens` | 自动轮次达到输出 token 上限 |
-| `turn-error` | turn 以 error 结束 |
-| `agent-error` | 自动轮次期间 agent 报错 |
-| `queue-failed` | round 消息无法入队 |
-| `driver-error` | 驱动器内部异常 |
-| `prompt-rejected` | round 消息在进入 step 前被下游 hook 拒绝 |
-| `checkpoint-failed` | 注入下一轮前 flush Session 日志失败（durability checkpoint） |
+| `max-tokens` | the automatic round hit the output token limit |
+| `turn-error` | the turn ended in error |
+| `agent-error` | the agent reported an error during the automatic round |
+| `queue-failed` | the round message could not be queued |
+| `driver-error` | internal driver exception |
+| `prompt-rejected` | the round message was rejected by a downstream hook before entering a step |
+| `checkpoint-failed` | flushing the Session log before injecting the next round failed (durability checkpoint) |
 
-`agent-error` 通常是失败轮次实际记录到的 code（`agent/error` 先于 `turn/end` 到达，两者都属于
-该轮次自己的 turn）。人类 / hook 打断或取消**该轮次自己的 turn** 会 `pause`（pause 不记录
-reason）；`parent` 取消（卸载、stale round、终止性目标变更）与 `disposed` 不会写 pause。
-Host 命令侧 pause / complete / block / clear 只 abort 正在运行的自动轮次，不影响人类 turn；
-`edit` 会撤回尚未 admitted 的 round，下一轮使用新 revision。blocked 目标 `resume` 后
-`blockedReason` 清除。
+`agent-error` is usually the code actually recorded for a failed round (`agent/error` arrives before
+`turn/end`, and both belong to that round's own turn). A human / hook interrupt or cancellation of
+**the round's own turn** `pause`s the goal (pauses carry no reason); `parent` cancellation (unload,
+stale round, terminal goal change) and `disposed` write no pause. Host-command pause / complete /
+block / clear only abort the running automatic round and do not affect human turns; `edit` withdraws
+rounds that have not yet been admitted, and the next round uses the new revision. `resume` on a
+blocked goal clears `blockedReason`.
 
-## 权限模型
+## Permission model
 
-目标变更要么来自人类，要么来自“当前目标的自动轮次”，模型无法仅凭自己的判断创建或改写目标：
+Goal changes come either from a human or from "the current goal's automatic round"; the model cannot
+create or rewrite a goal on its own judgment:
 
-- **人类**：`/infini-goal ...` 命令可以执行创建、编辑、暂停、恢复、完成、阻塞、清除，
-  以及 `interval` / `quiet` / `timezone` 等节奏配置。
-- **模型工具**：
-  - `create_infini_goal` 需要当前 turn 中存在来自 runtime root agent 的**直接人类消息**；
-  - `update_infini_goal` 的 `edit`、`config`、`pause`、`resume` 同样需要直接人类消息；
-  - `complete` 与 `blocked` 额外允许“当前目标的自动轮次”本身授权；
-  - 在自动轮次中报告 `blocked` 时，还要求已达到 `blockedAfterConsecutiveRounds`（默认 3）；
-  - 授权判定基于 Session 事件（open turn 内的 `user/message` source、root agent 身份），
-    不采信模型的自我声明。
-- **UI**：状态条按钮只是提交 `/infini-goal ...` 命令，没有独立 Remote API 或更高权限。
-- **安全边界**：插件运行在 Host 进程内，安装第三方插件等同于信任其代码；本套件不改变 DSH
-  的沙箱 / 权限模式，也不额外提供任何提权入口。
+- **Humans**: `/infini-goal ...` commands can create, edit, pause, resume, complete, block, and clear
+  goals, as well as configure pacing via `interval` / `quiet` / `timezone`.
+- **Model tools**:
+  - `create_infini_goal` requires a **direct human message** from the runtime root agent in the
+    current turn;
+  - `edit`, `config`, `pause`, and `resume` on `update_infini_goal` likewise require a direct human
+    message;
+  - `complete` and `blocked` are additionally allowed under "the current goal's automatic round"
+    authorization;
+  - reporting `blocked` in an automatic round also requires `blockedAfterConsecutiveRounds`
+    (default 3) to be reached;
+  - authorization is determined from Session events (the `user/message` source inside the open turn,
+    root-agent identity), not from the model's self-report.
+- **UI**: status-bar buttons only submit `/infini-goal ...` commands; there is no independent Remote
+  API or higher privilege.
+- **Security boundary**: the plugin runs inside the host process, so installing a third-party plugin
+  is equivalent to trusting its code; this suite does not change DSH's sandbox / permission mode,
+  nor does it provide any privilege-escalation entry point.
 
-## 已知限制
+## Known limitations
 
-- **单目标**：每个 Session 同时只有一个 infini-goal。
-- **恢复即续跑**：`active` 是持久化状态，DSH 重启或会话恢复后会继续；`autoContinueOnStart: false`
-  时驱动器在启动 / Agent 创建时把 active 目标**持久化为 paused**，状态条显示 paused 并可
-  恢复，需要人类 `/infini-goal resume`。
-- **fork 也会续跑**：fork 出的子会话包含目标历史，默认继续推进；不需要时先 `pause` 再 fork。
-- **UI 操作经命令**：状态条按钮发送 `/infini-goal ...` 命令，不引入自定义 Typert Remote。
-- **倒计时是本地计算**：状态条按 projection 与本地每秒计算节奏行，允许秒级显示偏差；
-  实际是否触发由驱动器用同一份 `planTrigger` 计算。
-- **兼容性**：插件 / bundle 包声明 `engines.dsh: >=0.2.2-rc.1 <0.3.0`；DSH 升级到 0.3 前需要更新插件。
-- **单 Session 语义**：目标与轮次属于当前 Session；本插件不提供跨 Session 共享或汇总目标。
+- **Single goal**: each Session has exactly one infini-goal at a time.
+- **Resume means continue**: `active` is durable, so the goal continues after a DSH restart or a
+  session restore; with `autoContinueOnStart: false` the driver **durably pauses** active goals at
+  startup / agent creation, the status bar shows paused and can resume, and a human must run
+  `/infini-goal resume`.
+- **Forks continue too**: a forked child session contains the goal history and keeps advancing by
+  default; `pause` first if you do not want that.
+- **UI actions go through commands**: status-bar buttons send `/infini-goal ...` commands; no custom
+  Typert Remote is introduced.
+- **The countdown is computed locally**: the status bar derives the pacing row from the projection
+  and local per-second computation, so second-level display drift is possible; the actual trigger is
+  computed by the driver with the same `planTrigger`.
+- **Compatibility**: plugin / bundle packages declare `engines.dsh: >=0.2.2-rc.1 <0.3.0`; the plugins
+  must be updated before DSH moves to 0.3.
+- **Single-session semantics**: goals and rounds belong to the current Session; the plugin offers no
+  cross-session sharing or aggregation of goals.
 
-## 故障排查
+## Troubleshooting
 
-| 现象 | 可能原因 / 处理 |
+| Symptom | Likely cause / action |
 | --- | --- |
-| 安装后没有状态条 | bundle 未启用（Plugins 页面勾选）、页面未刷新、或 DSH 未重启使 preset 变更生效 |
-| 没有 `/infini-goal` 命令或 `*_infini_goal` 工具 | bundle 未启用 / 被 DSH 跳过（检查 DSH 版本与 `engines.dsh`）；本地 checkout 需先 `pnpm build` |
-| 本地安装脚本报 `run "pnpm build" first` | 先执行 `pnpm build` 再 `pnpm install:profile` |
-| 目标不自动续跑 | 相态不是 `active`；命中静默时段或最小间隔未到；`autoContinueOnStart: false` 下被持久 pause；agent 正忙或有竞争输入 |
-| `/infini-goal quiet ...` 报“覆盖全天”类错误 | 静默时段并集覆盖了全部本地时间，会永久阻止自动轮次；改为部分时段或 `none` |
-| 状态条显示 paused 但没有自动恢复 | 这是 `autoContinueOnStart: false` 的预期行为；执行 `/infini-goal resume` |
-| fork 后目标继续跑 | 预期行为；fork 前先 `/infini-goal pause` |
-| 重启后 Session 无法恢复，日志报 "refusing to interpret the log" | 该 Session 由 0.1.0 的旧表示写入；退出 DSH 后运行 `node scripts/repair-session-log.mjs --write --dsh-home ~/.dsh`（见「从 0.1.0 升级 / 修复旧会话」） |
-| `repair-session-log.mjs` 报 session.lock | 对应 Session 仍被 DSH 打开；退出 DSH / 关闭 Session 后重跑，或确认属主进程已退出后加 `--force` |
-| 关闭官方 goal 后仍看到 `/goal` | preset 变更只影响新 Agent，重启一次 DSH 并新建会话 |
+| No status bar after installing | the bundle is not enabled (tick it on the Plugins page), the page was not refreshed, or DSH was not restarted after a preset change |
+| No `/infini-goal` command or `*_infini_goal` tools | the bundle is not enabled / was skipped by DSH (check the DSH version and `engines.dsh`); a local checkout needs `pnpm build` first |
+| The local install script says `run "pnpm build" first` | run `pnpm build` before `pnpm install:profile` |
+| The goal does not continue automatically | phase is not `active`; a quiet window applies or the minimum interval has not elapsed; the goal was durably paused under `autoContinueOnStart: false`; the agent is busy or competing input exists |
+| `/infini-goal quiet ...` reports a "covers all day"-style error | the union of quiet windows covers all local time, which would block automatic rounds forever; use partial windows or `none` |
+| The status bar shows paused and does not resume automatically | expected under `autoContinueOnStart: false`; run `/infini-goal resume` |
+| The goal keeps running after a fork | expected; run `/infini-goal pause` before forking |
+| A Session cannot be restored after a restart; the log reports "refusing to interpret the log" | that Session was written with the old 0.1.0 representation; quit DSH and run `node scripts/repair-session-log.mjs --write --dsh-home ~/.dsh` (see "Upgrading from 0.1.0 / repairing old sessions") |
+| `repair-session-log.mjs` reports session.lock | the Session is still open in DSH; quit DSH / close the Session and retry, or add `--force` once the owning process has exited |
+| `/goal` still appears after switching the official goal off | preset changes only affect new agents; restart DSH and create a new session once |
 
-## 发布
+## Publishing
 
-包已推送到 npm 时可一条命令安装：
+When the packages are on npm, one command installs them:
 
 ```sh
 dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle
 ```
 
-CI 发布采用 **npm Trusted Publishing（Keyless OIDC）**：推 `v*` tag 触发
-[`.github/workflows/publish.yml`](.github/workflows/publish.yml)，由 GitHub Actions 的
-`id-token: write` 换取 npm 短时 token，**不需要 `NPM_TOKEN` secret**，公开仓库下自动附带
-provenance。CI 还会先校验 `v*` tag 与全部 8 个可发布包（含根 `package.json`）的 `version`
-完全一致，不一致直接失败，避免 tag 与 npm 版本错位。每个包需一次性配置 trusted publisher：
+CI publishing uses **npm Trusted Publishing (keyless OIDC)**: pushing a `v*` tag triggers
+[`.github/workflows/publish.yml`](.github/workflows/publish.yml); GitHub Actions exchanges its
+`id-token: write` permission for a short-lived npm token, so **no `NPM_TOKEN` secret is needed**, and
+public repositories get provenance automatically. CI first verifies that the `v*` tag matches the
+`version` of all 8 publishable packages (including the root `package.json`) exactly and fails
+otherwise, so the tag and the npm versions cannot drift apart. Each package needs a one-time trusted
+publisher setup:
 
 ```sh
 npm login
-scripts/trusted-publishers.sh          # 批量配置全部 8 个包（--dry-run / --list 可选）
+scripts/trusted-publishers.sh          # configure all 8 packages at once (--dry-run / --list available)
 ```
 
-完整发版流程（版本升级、dry-run、本地/CI 发布、GitHub Release、故障处理）见
-[`docs/PUBLISHING.md`](docs/PUBLISHING.md)。
+The full release process (version bumps, dry-run, local/CI publishing, GitHub Release, failure
+handling) is in [`docs/PUBLISHING.md`](docs/PUBLISHING.md).
 
-## 关闭系统自带的 dsh-goal（可选）
+## Disabling the built-in dsh-goal (optional)
 
-DSH 自带官方 goal 模式，与本插件可以共存（工具、命令、状态条都不同名）。若希望
-infini-goal 成为唯一目标系统，安装可选的伴生 bundle 即可，profile 的
-`cordis.patch.yml` 保持干净：
+DSH ships an official goal mode, which can coexist with this plugin (tools, commands, and status bars
+all have different names). If you want infini-goal to be the only goal system, install the optional
+companion bundle; the profile's `cordis.patch.yml` stays clean:
 
 ```sh
-dsh plugin --profile desktop add @yankeguo/dsh-disable-goal-bundle   # 发布后
-pnpm install:profile --disable-builtin-goal                          # 本地 checkout
+dsh plugin --profile desktop add @yankeguo/dsh-disable-goal-bundle   # after publishing
+pnpm install:profile --disable-builtin-goal                          # from a local checkout
 ```
 
-随后在 **Plugins** 页面勾选/取消该 bundle 即可实时开关官方 goal 模式。
-该 bundle **不复制 preset 内容**：它停用 shipped preset 声明，并用一个很小的运行时
-filter 读取已安装 preset、只过滤掉 `command-goal` / `tool-goal`，因此 DSH 升级后无需重新生成。
-原理（为什么不能直接禁 `goal` 服务、preset patch 粒度等）、生效时机（preset 变更只影响
-新 Agent，建议重启一次 DSH）、脚本方式与升级后维护见
-[`docs/DISABLE-BUILTIN-GOAL.md`](docs/DISABLE-BUILTIN-GOAL.md)。
+Then tick/untick the bundle on the **Plugins** page to toggle the official goal mode live.
+This bundle **does not copy preset content**: it disables the shipped preset declaration and uses a
+tiny runtime filter that reads the installed preset and filters out only `command-goal` / `tool-goal`,
+so no regeneration is needed after a DSH upgrade. For the rationale (why the `goal` service cannot
+simply be disabled, preset patch granularity, and so on), when it takes effect (preset changes only
+affect new agents; restart DSH once), script usage, and post-upgrade maintenance, see
+[`docs/DISABLE-BUILTIN-GOAL.md`](docs/DISABLE-BUILTIN-GOAL.md).
 
-## 开发与验证
+## Development and verification
 
 ```sh
-pnpm typecheck     # 全仓 TS 检查
-pnpm test          # 协议数学 / fold / 工具与命令解析 / driver 状态机 / UI 格式化等单测（22 个文件 / 376 个用例）
-pnpm build         # esbuild 产物（9 个 lib/*.js）
-pnpm dev:patch     # 生成 .tmp/cordis.patch.yml（绝对路径插入，免安装调试）
+pnpm typecheck     # TypeScript check across the monorepo
+pnpm test          # unit tests for protocol math / fold / tool and command parsing / driver state machine / UI formatting (22 files / 376 cases)
+pnpm build         # esbuild outputs (9 lib/*.js files)
+pnpm dev:patch     # generate .tmp/cordis.patch.yml (absolute-path insertion; debug without installing)
 ```
 
-端到端验证（隔离 DSH_HOME + mock LLM，不触碰当前运行中的 DSH）：
+End-to-end verification (isolated DSH_HOME + mock LLM; does not touch the running DSH):
 
 ```sh
-tools/e2e/bootstrap.sh          # 创建 /tmp 下的隔离 profile
-tools/e2e/smoke.sh              # 基础设施 smoke（插入 plugin / session / mock LLM）
-tools/e2e/suite.sh --fresh      # 本插件套件的端到端场景（最小间隔 / 静默时段 / 暂停）
+tools/e2e/bootstrap.sh          # create an isolated profile under /tmp
+tools/e2e/smoke.sh              # infrastructure smoke (plugin / session / mock LLM insertion)
+tools/e2e/suite.sh --fresh      # end-to-end scenarios for this suite (minimum interval / quiet windows / pause)
 ```
 
-设计说明与数据结构见 [`docs/DESIGN.md`](docs/DESIGN.md)，E2E 工具与已知限制见
-[`tools/e2e/README.md`](tools/e2e/README.md)。
+Design notes and data structures are in [`docs/DESIGN.md`](docs/DESIGN.md); E2E tooling and known
+limitations are in [`tools/e2e/README.md`](tools/e2e/README.md).
 
 ## License
 
