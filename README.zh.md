@@ -362,19 +362,24 @@ Host 命令侧 pause / complete / block / clear 只 abort 正在运行的自动�
 dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle
 ```
 
-CI 发布采用 **npm Trusted Publishing（Keyless OIDC）**：推 `v*` tag 触发
-[`.github/workflows/publish.yml`](.github/workflows/publish.yml)，由 GitHub Actions 的
-`id-token: write` 换取 npm 短时 token，**不需要 `NPM_TOKEN` secret**，公开仓库下自动附带
-provenance。CI 还会先校验 `v*` tag 与全部 8 个可发布包（含根 `package.json`）的 `version`
-完全一致，不一致直接失败，避免 tag 与 npm 版本错位。每个包需一次性配置 trusted publisher：
+发布采用 **staged publish（暂存发布）+ npm Trusted Publishing（Keyless OIDC）**：推 `v*` tag 触发
+[`.github/workflows/publish.yml`](.github/workflows/publish.yml)，先校验 tag 与全部 8 个可发布包
+（含根 `package.json`）的 `version` 完全一致，再 install / typecheck / test / build，并按依赖拓扑
+**逐个 stage** 所有包。暂存版本是私有的、不可安装；工作流没有任何 npm token secret（仅
+`id-token: write`），也**不创建** GitHub Release。随后由维护者在本机审查并用 2FA 逐包 approve，
+版本才公开，并由审批脚本创建 GitHub Release：
 
 ```sh
-npm login
-scripts/trusted-publishers.sh          # 批量配置全部 8 个包（--dry-run / --list 可选）
+npm login                                                      # 维护者账号，2FA 已开启
+scripts/trusted-publishers.sh                                  # 一次性配置 stage-only trusted publisher
+node scripts/promote-release.mjs --version 0.2.1 --list-only   # 审查暂存结果
+node scripts/promote-release.mjs --version 0.2.1               # approve（2FA）+ GitHub Release
 ```
 
-完整发版流程（版本升级、dry-run、本地/CI 发布、GitHub Release、故障处理）见
-[`docs/PUBLISHING.md`](docs/PUBLISHING.md)。
+这样中途失败不会造成半发布：未 approve 前没有任何版本公开，stage 失败可以 reject 后对同一个已存在
+的 tag 重跑。trusted publisher 只授予 `--allow-stage-publish`，CI 无法直接公开发布。完整流程
+（trusted publisher 迁移、用 `workflow_dispatch` + `release_tag` 重跑已存在的 tag、审批、失败恢复、
+安全模型）见 [`docs/PUBLISHING.md`](docs/PUBLISHING.md)。
 
 ## 系统自带的 dsh-goal 默认关闭
 

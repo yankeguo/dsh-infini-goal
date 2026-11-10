@@ -18,8 +18,10 @@
     "verify": "pnpm run typecheck && pnpm run test && pnpm run build",
     "install:profile": "node scripts/install-profile.mjs",
     "uninstall:profile": "node scripts/install-profile.mjs --uninstall",
-    "release:dry": "pnpm build && pnpm publish -r --dry-run --access public --no-git-checks --tag latest",
-    "release:publish": "pnpm build && pnpm publish -r --access public --no-git-checks --tag latest"
+    "release:check": "node scripts/stage-release.mjs --check",
+    "release:stage": "pnpm build && node scripts/stage-release.mjs",
+    "release:stage:dry": "pnpm build && node scripts/stage-release.mjs --dry-run --no-git-checks",
+    "release:promote": "node scripts/promote-release.mjs"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.1.0",

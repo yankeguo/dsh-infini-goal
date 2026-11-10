@@ -400,21 +400,27 @@ When the packages are on npm, one command installs them:
 dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle
 ```
 
-CI publishing uses **npm Trusted Publishing (keyless OIDC)**: pushing a `v*` tag triggers
-[`.github/workflows/publish.yml`](.github/workflows/publish.yml); GitHub Actions exchanges its
-`id-token: write` permission for a short-lived npm token, so **no `NPM_TOKEN` secret is needed**, and
-public repositories get provenance automatically. CI first verifies that the `v*` tag matches the
-`version` of all 8 publishable packages (including the root `package.json`) exactly and fails
-otherwise, so the tag and the npm versions cannot drift apart. Each package needs a one-time trusted
-publisher setup:
+Releases use **staged publishing** through npm Trusted Publishing (keyless OIDC): pushing a `v*`
+tag triggers [`.github/workflows/publish.yml`](.github/workflows/publish.yml), which first verifies
+that the tag matches the `version` of all 8 publishable packages (including the root
+`package.json`), then installs, typechecks, tests, builds, and **stages** every package in dependency
+order. Staged versions are private and not installable; the workflow holds no npm token secret
+(`id-token: write` only) and never creates the GitHub Release. A maintainer then reviews the staged
+versions and approves them with a 2FA prompt from their own machine, which publishes them and
+creates the GitHub Release:
 
 ```sh
-npm login
-scripts/trusted-publishers.sh          # configure all 8 packages at once (--dry-run / --list available)
+npm login                                                      # maintainer account with 2FA
+scripts/trusted-publishers.sh                                  # one-time stage-only trusted publishers
+node scripts/promote-release.mjs --version 0.2.1 --list-only   # review the staged uploads
+node scripts/promote-release.mjs --version 0.2.1               # approve (2FA) + GitHub Release
 ```
 
-The full release process (version bumps, dry-run, local/CI publishing, GitHub Release, failure
-handling) is in [`docs/PUBLISHING.md`](docs/PUBLISHING.md).
+This keeps a partial failure safe: nothing is public until every package is approved, and a failed
+staging run can be rejected and re-run for the same existing tag. The trusted publisher grants only
+`--allow-stage-publish`, so CI can never publish directly. The full process (trusted-publisher
+migration, re-staging an existing tag via `workflow_dispatch` + `release_tag`, approval, failure
+recovery, security model) is in [`docs/PUBLISHING.md`](docs/PUBLISHING.md).
 
 ## Built-in dsh-goal is off by default
 
