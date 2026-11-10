@@ -32,8 +32,8 @@ pnpm workspace，`packages/*`：
 | `tool` | `@yankeguo/dsh-tool-infini-goal` | 模型工具：`get_infini_goal` / `create_infini_goal` / `update_infini_goal` + system prompt 指导 |
 | `command` | `@yankeguo/dsh-command-infini-goal` | 人类命令 `/infini-goal` |
 | `client-ui` | `@yankeguo/dsh-client-ui-infini-goal` | 浏览器 UI：composer 上方的 InfiniGoalBar（状态、倒计时、静默提示、pause/resume/clear） |
-| `bundle` | `@yankeguo/dsh-infini-goal-bundle` | bundle 包：`cordis.patch.yml` 把所有插件插入 profile + 依赖声明 |
-| `disable-goal-bundle` | `@yankeguo/dsh-disable-goal-bundle` | 可选伴生 bundle：一层 patch + 小型 `preset-filter` 运行时插件，关闭系统自带 dsh-goal（可在 Plugins 开关） |
+| `bundle` | `@yankeguo/dsh-infini-goal-bundle` | bundle 包：`dsh.bundle.patch` 依次应用 `cordis.patch.yml`（5 个 infini-goal 行）与生成的 `cordis.disable-goal.patch.yml`（默认关闭系统自带 dsh-goal）+ 依赖声明 |
+| `disable-goal-bundle` | `@yankeguo/dsh-disable-goal-bundle` | 独立 bundle（主 bundle 已内嵌同一层）：生成的 patch + 小型 `preset-filter` 运行时插件，关闭系统自带 dsh-goal（可在 Plugins 开关）；主 bundle 以运行时依赖引用其 filter 模块 |
 
 构建：`pnpm build` 用 esbuild：
 - host 入口 `src/index.ts` → `lib/index.js`，external `@deepseek-ai/*`、`@yankeguo/*` 与
@@ -385,15 +385,19 @@ bundle 的 `package.json` 声明 `dsh.bundle.patch` 与 `dsh.bundle.listedByDefa
 （bundle 默认不写，等于使用插件内默认值）。
 
 本地开发/验收：`--patch` overlay 用**绝对路径**指向各包的 `lib/index.js`，
-避免安装步骤（DSH 支持 insert name 为绝对文件路径）。伴生 bundle
-`packages/disable-goal-bundle/cordis.patch.yml` 是一层独立的 patch：停用官方
+避免安装步骤（DSH 支持 insert name 为绝对文件路径）。
+
+主 bundle 的 `dsh.bundle.patch` 是**有序文件数组**：先 `cordis.patch.yml`（上面的 5 行），
+再生成的 `cordis.disable-goal.patch.yml`（默认关闭系统自带 dsh-goal）。后者与独立 bundle
+`packages/disable-goal-bundle/cordis.patch.yml` 由同一个生成器输出、内容逐字节相同：停用官方
 `goal-round-driver` / `ui-goal` 与 `preset-*` 声明，并用小型 `preset-filter` 运行时插件
 在启动时过滤 shipped preset 的 `command-goal` / `tool-goal` 行（见
-[`DISABLE-BUILTIN-GOAL.md`](DISABLE-BUILTIN-GOAL.md)）。
+[`DISABLE-BUILTIN-GOAL.md`](DISABLE-BUILTIN-GOAL.md)）。两个 bundle 共用同一批 row id 是
+刻意的：同时启用时 Loader 每个 id 只保留一个 entry（后插入者生效），preset filter 不会重复挂载。
 
 ## 11. 验证（已实测，冻结版本）
 
-- `pnpm typecheck` 全绿；`pnpm test`：**22 个测试文件 / 376 个用例**（基线 243；新增覆盖
+- `pnpm typecheck` 全绿；`pnpm test`：**23 个测试文件 / 381 个用例**（v0.1.1 基线 22 / 376；新增 bundle 组合一致性检查，其余覆盖
   protocol 时间数学、core fold/service/持久化记录、driver 状态机与生命周期、tool/command
   解析与授权、client-ui 结果处理与样式注入）。
 - `pnpm build` 产出 **9 个 `lib/*.js`**：protocol 的 `index`/`client`、core、driver、tool、
@@ -423,6 +427,14 @@ bundle 的 `package.json` 声明 `dsh.bundle.patch` 与 `dsh.bundle.listedByDefa
     `install-profile.mjs` 链接 8 个包并选中 bundle、无加载错误；client entry + bundle HTTP 200；
     `commands/list` 有 `infini-goal`；创建 / status / pause 经真实 commands Remote；驱动器跑出
     round 1（seq 13）且 pause 持久化；工具行 advertise 三个 `*_infini_goal` 工具。
+  - `tools/e2e/probe-bundles.sh`（bundle 打包回归，隔离 home）→ **PROBE BUNDLES PASS (61 checks)**：
+    A) 主 bundle 单独安装即含关闭层：`--dump-config` 204 行、id 全唯一、5 个官方行 `disabled: true`、
+    8 个 infini-goal / preset-filter 行各 1 次；boot 图无 `@deepseek-ai/dsh-client-ui-goal` client
+    entry、无 `/goal` 命令与官方 goal 工具，infini-goal 命令 / 驱动器 / 工具全部可用；安装脚本在
+    旧 profile 上自动取消伴生 bundle 的选择（迁移路径）。
+    B) 旧 profile 仍同时选中主 bundle + 伴生 bundle：`--dump-config` 207 行、仅 3 个
+    `preset-*-filter` id 各出现 2 次（Loader 每个 id 只挂载一次）；启动无重复 preset /
+    `waiting for goals` 错误，运行时行为与 A 相同。
 - 截图见 `docs/screenshots/`。
 
 ## 12. 实现记录与偏差

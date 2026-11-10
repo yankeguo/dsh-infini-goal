@@ -12,7 +12,10 @@ and configurable quiet windows**.
   empty loop cannot spin into rapid retries;
 - **Quiet windows** (`quietWindows`): no automatic triggers inside the configured local time
   ranges; human conversation and tool calls keep working as usual, and automatic progress resumes
-  when the window ends. Use them for do-not-disturb, focus time, off-hours, nights, or anything else.
+  when the window ends. Use them for do-not-disturb, focus time, off-hours, nights, or anything else;
+- **Built-in goal off by default**: installing this bundle also switches DSH's official `dsh-goal`
+  off as one ordinary bundle layer, so infini-goal is the only goal system without installing a
+  second bundle. Every row it contributes stays switchable on the Plugins page.
 
 Docs: [Design](docs/DESIGN.md) · [Publishing guide](docs/PUBLISHING.md) ·
 [Disabling the built-in dsh-goal](docs/DISABLE-BUILTIN-GOAL.md) ·
@@ -31,7 +34,7 @@ Docs: [Design](docs/DESIGN.md) · [Publishing guide](docs/PUBLISHING.md) ·
 | Human command | `/infini-goal` — inspect status, configure pacing, pause/resume without spending model rounds |
 | Status-bar UI | InfiniGoalBar above the composer: phase, rounds, trigger pacing, quiet-window hint, pause/resume/clear |
 | Permission model | Every change needs human authorization or the current automatic round's authorization; the model cannot rewrite the goal on its own (see [Permission model](#permission-model)) |
-| Coexistence | Tool, command, and status-bar names do not collide with the official `dsh-goal`; a companion bundle can also switch the official goal off |
+| Coexistence | Tool, command, and status-bar names do not collide with the official `dsh-goal`; installing the bundle also switches the official goal off by default |
 
 ## UI
 
@@ -76,8 +79,8 @@ packages/
   tool/        @yankeguo/dsh-tool-infini-goal       model tools
   command/     @yankeguo/dsh-command-infini-goal    the /infini-goal human command
   client-ui/   @yankeguo/dsh-client-ui-infini-goal  browser status bar
-  bundle/      @yankeguo/dsh-infini-goal-bundle     bundle: cordis.patch.yml + dependencies
-  disable-goal-bundle/  @yankeguo/dsh-disable-goal-bundle  optional companion bundle: switches the built-in dsh-goal off
+  bundle/      @yankeguo/dsh-infini-goal-bundle     bundle: cordis.patch.yml + generated cordis.disable-goal.patch.yml + dependencies
+  disable-goal-bundle/  @yankeguo/dsh-disable-goal-bundle  standalone bundle: only switches the built-in dsh-goal off (also provides the main bundle's runtime preset-filter module)
 ```
 
 `pnpm build` produces 9 `lib/*.js` files: protocol's `index`/`client`, core, driver, tool, command,
@@ -102,17 +105,20 @@ runtime asset and is not transpiled.
 ### Install from npm (after publishing; recommended)
 
 ```sh
-# Main bundle: core service + driver + model tools + command + status bar
+# Main bundle: core service + driver + model tools + command + status bar.
+# It also switches the built-in dsh-goal mode off by default.
 dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle
-
-# Optional companion bundle: switches the built-in dsh-goal off
-dsh plugin --profile desktop add @yankeguo/dsh-disable-goal-bundle
 ```
 
-After installing, confirm on the **Plugins** page that the bundle is enabled (newly installed
-bundles are usually enabled by default; if it shows as disabled, tick it), then refresh the Web page.
-For advanced setups you can also install individual plugin packages and insert their loader rows
-into the profile's `cordis.patch.yml` yourself; for everyday use, install the main bundle.
+One bundle is enough: it embeds the same disable layer as the standalone
+`@yankeguo/dsh-disable-goal-bundle`, so the official goal mode is switched off without installing
+that companion bundle. After installing, confirm on the **Plugins** page that the bundle is enabled
+(newly installed bundles are usually enabled by default; if it shows as disabled, tick it), then
+refresh the Web page. On the bundle's page every row it contributes (the five infini-goal rows and
+the three generated preset-filter rows) can be switched individually; switching the whole bundle
+off restores the official goal mode. For advanced setups you can also install individual plugin
+packages and insert their loader rows into the profile's `cordis.patch.yml` yourself; for everyday
+use, install the main bundle.
 
 ### Install from a local checkout (development / acceptance)
 
@@ -120,18 +126,22 @@ into the profile's `cordis.patch.yml` yourself; for everyday use, install the ma
 pnpm install
 pnpm build
 pnpm install:profile                  # defaults to --profile desktop
-# or specify a profile / home; --disable-builtin-goal also switches the official goal off
+# or specify a profile / home
 node scripts/install-profile.mjs --profile desktop --dsh-home ~/.dsh
-pnpm install:profile --disable-builtin-goal
 ```
+
+`--disable-builtin-goal` is still accepted as a deprecated no-op for scripts written against older
+releases.
 
 The script does three things:
 
 1. symlinks all 8 workspace packages (6 plugin packages + 2 bundle packages) into
    `$DSH_HOME/profiles/<profile>/node_modules/@yankeguo/`;
-2. appends `@yankeguo/dsh-infini-goal-bundle` to the profile's `dsh.profile.bundles`
-   (with `--disable-builtin-goal` it also appends the companion bundle and clears the same-purpose
-   block that older scripts wrote into the profile patch);
+2. appends `@yankeguo/dsh-infini-goal-bundle` to the profile's `dsh.profile.bundles`. The bundle
+   embeds the built-in-goal disable layer, so the official goal is off by default; a profile that
+   still selected the old companion bundle has it deselected (the package stays installed because
+   the main bundle imports its `preset-filter` module), and a leftover generated disable-goal block
+   in the profile patch is removed;
 3. backs up the profile's `package.json` before writing (when there are changes).
 
 DSH's profile HMR loads host plugins live; the status bar appears after refreshing the browser page.
@@ -154,6 +164,13 @@ pnpm uninstall:profile                # remove the links and bundle selection
 
 Before upgrading DSH across a major version (0.3), update the plugins' / bundles' `engines.dsh` and
 regression-test; incompatible bundles are skipped by DSH.
+
+When upgrading from a release whose main bundle did **not** yet embed the disable layer: if the
+profile still selects `@yankeguo/dsh-disable-goal-bundle`, disable/remove that bundle on the Plugins
+page (or rerun `pnpm install:profile`, which deselects it). Both bundles share the same row ids, so
+DSH tolerates the duplicate rows and mounts the filters once, but the Plugins page can then no
+longer switch those three filter rows individually — prefer one bundle. The companion bundle stays
+useful for profiles that want the built-in goal off **without** installing the infini-goal suite.
 
 ### Upgrading from 0.1.0 / repairing old sessions
 
@@ -373,7 +390,7 @@ create or rewrite a goal on its own judgment:
 | The goal keeps running after a fork | expected; run `/infini-goal pause` before forking |
 | A Session cannot be restored after a restart; the log reports "refusing to interpret the log" | that Session was written with the old 0.1.0 representation; quit DSH and run `node scripts/repair-session-log.mjs --write --dsh-home ~/.dsh` (see "Upgrading from 0.1.0 / repairing old sessions") |
 | `repair-session-log.mjs` reports session.lock | the Session is still open in DSH; quit DSH / close the Session and retry, or add `--force` once the owning process has exited |
-| `/goal` still appears after switching the official goal off | preset changes only affect new agents; restart DSH and create a new session once |
+| `/goal` still appears | the main bundle switches the official goal off by default, and preset changes only affect new agents: restart DSH and create a new session once. If the bundle or one of its preset-filter rows was disabled on the Plugins page, re-enable it |
 
 ## Publishing
 
@@ -399,32 +416,48 @@ scripts/trusted-publishers.sh          # configure all 8 packages at once (--dry
 The full release process (version bumps, dry-run, local/CI publishing, GitHub Release, failure
 handling) is in [`docs/PUBLISHING.md`](docs/PUBLISHING.md).
 
-## Disabling the built-in dsh-goal (optional)
+## Built-in dsh-goal is off by default
 
-DSH ships an official goal mode, which can coexist with this plugin (tools, commands, and status bars
-all have different names). If you want infini-goal to be the only goal system, install the optional
-companion bundle; the profile's `cordis.patch.yml` stays clean:
+DSH ships an official goal mode which can technically coexist with this plugin (tools, commands,
+and status bars all have different names). Installing `@yankeguo/dsh-infini-goal-bundle` switches
+the official mode off as one ordinary bundle layer, so infini-goal is the only goal system and the
+profile's `cordis.patch.yml` stays clean:
 
 ```sh
-dsh plugin --profile desktop add @yankeguo/dsh-disable-goal-bundle   # after publishing
-pnpm install:profile --disable-builtin-goal                          # from a local checkout
+dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle   # after publishing; one bundle is enough
 ```
 
-Then tick/untick the bundle on the **Plugins** page to toggle the official goal mode live.
-This bundle **does not copy preset content**: it disables the shipped preset declaration and uses a
-tiny runtime filter that reads the installed preset and filters out only `command-goal` / `tool-goal`,
-so no regeneration is needed after a DSH upgrade. For the rationale (why the `goal` service cannot
-simply be disabled, preset patch granularity, and so on), when it takes effect (preset changes only
-affect new agents; restart DSH once), script usage, and post-upgrade maintenance, see
+The main bundle's `dsh.bundle.patch` lists two files: `cordis.patch.yml` (the five infini-goal
+rows) and the generated `cordis.disable-goal.patch.yml` (the disable layer). Both are ordinary
+Loader rows, so on the bundle's page under **Plugins** you can switch, individually:
+
+- the five infini-goal rows (`infini-goal`, `infini-goal-driver`, `infini-goal-tool`,
+  `infini-goal-command`, `infini-goal-ui`) — e.g. keep the suite but hide the status bar;
+- the three generated `preset-*-filter` rows that re-mount the shipped agent presets without
+  `command-goal` / `tool-goal`.
+
+Switching the whole bundle off restores the official goal mode live. The disable layer **does not
+copy preset content**: it disables the shipped preset declaration and uses a tiny runtime filter
+that reads the installed preset and filters out only `command-goal` / `tool-goal`, so no
+regeneration is needed after a DSH upgrade. For the rationale (why the `goal` service cannot simply
+be disabled, preset patch granularity, when it takes effect — preset changes only affect new
+agents, so restart DSH once — script usage, and post-upgrade maintenance), see
 [`docs/DISABLE-BUILTIN-GOAL.md`](docs/DISABLE-BUILTIN-GOAL.md).
+
+`@yankeguo/dsh-disable-goal-bundle` still exists for profiles that want the built-in goal off
+**without** the infini-goal suite; it ships the same disable layer standalone. Do not enable both
+bundles in one profile: they share the same row ids on purpose, so DSH tolerates the duplicate rows
+and mounts one filter per preset (last row wins), but the Plugins page then cannot switch those three
+filter rows individually. `pnpm install:profile` deselects the companion automatically.
 
 ## Development and verification
 
 ```sh
 pnpm typecheck     # TypeScript check across the monorepo
-pnpm test          # unit tests for protocol math / fold / tool and command parsing / driver state machine / UI formatting (22 files / 376 cases)
+pnpm test          # unit tests (23 files / 381 cases), including the generated-bundle composition check
 pnpm build         # esbuild outputs (9 lib/*.js files)
 pnpm dev:patch     # generate .tmp/cordis.patch.yml (absolute-path insertion; debug without installing)
+node scripts/build-disable-goal-bundle.mjs --check   # generated bundle patches + manifests are current
 ```
 
 End-to-end verification (isolated DSH_HOME + mock LLM; does not touch the running DSH):
@@ -433,6 +466,8 @@ End-to-end verification (isolated DSH_HOME + mock LLM; does not touch the runnin
 tools/e2e/bootstrap.sh          # create an isolated profile under /tmp
 tools/e2e/smoke.sh              # infrastructure smoke (plugin / session / mock LLM insertion)
 tools/e2e/suite.sh --fresh      # end-to-end scenarios for this suite (minimum interval / quiet windows / pause)
+tools/e2e/probe-install.sh      # installed-profile proof: native goal off by default, /infini-goal works
+tools/e2e/probe-bundles.sh      # bundle packaging: main-only install, legacy-companion migration, duplicate-id tolerance
 ```
 
 Design notes and data structures are in [`docs/DESIGN.md`](docs/DESIGN.md); E2E tooling and known

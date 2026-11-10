@@ -5,19 +5,31 @@
  * This is the self-install path for a local checkout:
  *   - symlinks every `@yankeguo/dsh-*` workspace package into
  *     `$DSH_HOME/profiles/<profile>/node_modules/@yankeguo/`;
- *   - appends the main bundle to the profile's `dsh.profile.bundles`;
- *   - with `--disable-builtin-goal`, also selects the optional
- *     `@yankeguo/dsh-disable-goal-bundle` companion and removes a previously
- *     generated profile-patch block that did the same thing.
+ *   - appends the main bundle to the profile's `dsh.profile.bundles`. The main
+ *     bundle embeds the built-in-goal disable layer
+ *     (`cordis.disable-goal.patch.yml`), so installing it switches the built-in
+ *     dsh-goal mode off by default — no companion bundle is selected;
+ *   - deselects a previously selected `@yankeguo/dsh-disable-goal-bundle`
+ *     companion: its layer is now redundant, and two selected bundles would
+ *     compose duplicate (though tolerated) filter rows. The companion package
+ *     stays installed because the main bundle imports its `preset-filter`
+ *     runtime module;
+ *   - removes a previously generated profile-patch block that disabled the
+ *     built-in goal: the bundle layer supersedes it, and a leftover block would
+ *     duplicate the same insert rows.
+ *
+ * `--disable-builtin-goal` is accepted as a deprecated no-op so scripts written
+ * against older releases keep working; the built-in goal is already off.
  *
  * The write is idempotent: the profile manifest is only rewritten (and only
  * backed up) when its content actually changes, so repeated runs leave no
- * backup clutter. `--uninstall` reverses both the links, the bundle selection,
- * and any generated disable-goal patch block so the profile cannot keep
- * pointing at packages that are no longer linked.
+ * backup clutter. `--uninstall` reverses the links, the bundle selection, and
+ * any generated disable-goal patch block so the profile cannot keep pointing at
+ * packages that are no longer linked.
  *
  * The profile's HMR composes the selection live; restart DSH once so every
- * existing session is bound to the new preset revisions.
+ * existing session is bound to the new preset revisions. Individual bundle rows
+ * can be toggled later on the Plugins page.
  *
  * Usage:
  *   node scripts/install-profile.mjs [--profile desktop] [--dsh-home ~/.dsh]
@@ -52,6 +64,7 @@ function parseArgs(argv) {
     dshHome: process.env.DSH_HOME ?? join(homedir(), '.dsh'),
     uninstall: false,
     dryRun: false,
+    /** Deprecated compatibility alias: the built-in goal is now off by default. */
     disableBuiltinGoal: false,
   }
   /** Read the value of a `--flag value` pair and reject a missing/flag value. */
@@ -81,7 +94,7 @@ function parseArgs(argv) {
         break
       case '--help':
       case '-h':
-        console.log('Usage: node scripts/install-profile.mjs [--profile desktop] [--dsh-home <dir>] [--disable-builtin-goal] [--uninstall] [--dry-run]')
+        console.log('Usage: node scripts/install-profile.mjs [--profile desktop] [--dsh-home <dir>] [--disable-builtin-goal (deprecated)] [--uninstall] [--dry-run]')
         process.exit(0)
       // fallthrough for unknown flags
       default:
@@ -118,8 +131,9 @@ function missingBuildArtifacts(entry) {
   const missing = []
   const manifest = entry.manifest
   if (manifest.dsh?.bundle !== undefined) {
-    // A patch-only bundle has no host entry; the companion bundle additionally
-    // ships the runtime preset filter referenced by its patch rows.
+    // A patch-only bundle has no host entry. The companion bundle ships the
+    // runtime preset filter its patch rows import — the main bundle now embeds
+    // the same rows and depends on that package, so the asset is always needed.
     if (manifest.name === DISABLE_GOAL_BUNDLE && !existsSync(join(entry.dir, 'lib', 'preset-filter.js'))) {
       missing.push('lib/preset-filter.js')
     }
@@ -188,8 +202,8 @@ async function main() {
   const mainBundle = byName.get(MAIN_BUNDLE)
   const disableBundle = byName.get(DISABLE_GOAL_BUNDLE)
   if (mainBundle === undefined) throw new Error(`workspace package ${MAIN_BUNDLE} not found`)
-  if (options.disableBuiltinGoal && disableBundle === undefined) {
-    throw new Error(`workspace package ${DISABLE_GOAL_BUNDLE} not found`)
+  if (disableBundle === undefined) {
+    throw new Error(`workspace package ${DISABLE_GOAL_BUNDLE} not found (the main bundle imports its preset-filter runtime module)`)
   }
   const missingBuild = packages.flatMap(entry => missingBuildArtifacts(entry).map(file => `${entry.manifest.name} (${file})`))
   if (missingBuild.length > 0) {
@@ -214,9 +228,9 @@ async function main() {
         const linkPath = join(scopedDir, entry.manifest.name.replace(/^@[^/]+\//u, ''))
         if (isSymlink(linkPath)) unlinkSync(linkPath)
       }
-      // A leftover generated block would keep referencing the companion
-      // bundle's preset filter after its symlink is gone, which breaks the
-      // next boot, so uninstall removes it too.
+      // A leftover generated block inserts the same filter rows the bundle layer
+      // provides (and points at the packages removed here), so uninstall removes
+      // it too; otherwise the next boot would duplicate or fail to resolve rows.
       removeGeneratedPatchBlock(patchPath)
       writeManifestIfChanged(manifestPath, manifest)
     }
@@ -225,13 +239,18 @@ async function main() {
     return
   }
 
-  if (!bundles.includes(MAIN_BUNDLE)) bundles.push(MAIN_BUNDLE)
-  if (options.disableBuiltinGoal && !bundles.includes(DISABLE_GOAL_BUNDLE)) {
-    bundles.push(DISABLE_GOAL_BUNDLE)
-  }
+  // The main bundle embeds the built-in-goal disable layer, so a leftover
+  // companion selection is redundant and would duplicate the shared filter row
+  // ids (tolerated at runtime, but the Plugins page cannot switch those rows).
+  const next = bundles.filter(name => name !== DISABLE_GOAL_BUNDLE)
+  const deselectedCompanion = next.length !== bundles.length
+  if (!next.includes(MAIN_BUNDLE)) next.push(MAIN_BUNDLE)
 
   if (options.dryRun) {
     console.log(`[dry-run] would link ${packages.length} packages into ${scopedDir}`)
+    if (deselectedCompanion) {
+      console.log(`[dry-run] would deselect ${DISABLE_GOAL_BUNDLE}: the main bundle embeds the same disable layer`)
+    }
   } else {
     await mkdir(scopedDir, { recursive: true })
     for (const entry of packages) {
@@ -257,17 +276,19 @@ async function main() {
       symlinkSync(entry.dir, linkPath, 'dir')
       console.log(`linked ${entry.manifest.name} -> ${entry.dir}`)
     }
-    if (options.disableBuiltinGoal) removeGeneratedPatchBlock(patchPath)
-    manifest.dsh.profile.bundles = bundles
+    removeGeneratedPatchBlock(patchPath)
+    manifest.dsh.profile.bundles = next
     writeManifestIfChanged(manifestPath, manifest)
   }
 
   console.log(`${options.dryRun ? '[dry-run] ' : ''}enabled ${MAIN_BUNDLE} in profile ${options.profile}`)
-  if (options.disableBuiltinGoal) {
-    console.log(`${options.dryRun ? '[dry-run] ' : ''}enabled ${DISABLE_GOAL_BUNDLE} (built-in dsh-goal mode off; toggle it in Plugins)`)
-  } else {
-    console.log('built-in dsh-goal mode left untouched; pass --disable-builtin-goal to turn it off')
+  if (deselectedCompanion) {
+    console.log(`  deselected ${DISABLE_GOAL_BUNDLE}: its layer is now embedded by the main bundle (package kept installed)`)
   }
+  if (options.disableBuiltinGoal) {
+    console.log('note: --disable-builtin-goal is deprecated and no longer needed; the main bundle switches the built-in dsh-goal mode off by default')
+  }
+  console.log('built-in dsh-goal mode is off by default; toggle individual bundle rows on the Plugins page')
   console.log('Restart DSH once so existing sessions bind to the new preset revisions.')
   console.log('Try: /infini-goal <objective>   or ask the model to create an infini goal.')
 }

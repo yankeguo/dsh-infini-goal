@@ -11,12 +11,14 @@
 | 5 | `@yankeguo/dsh-command-infini-goal` | `/infini-goal` 命令 |
 | 6 | `@yankeguo/dsh-client-ui-infini-goal` | 浏览器状态条 |
 | 7 | `@yankeguo/dsh-infini-goal-bundle` | 安装入口 bundle |
-| 8 | `@yankeguo/dsh-disable-goal-bundle` | 可选伴生 bundle：关闭系统自带 dsh-goal（patch 层 + 小型 `preset-filter` 运行时插件） |
+| 8 | `@yankeguo/dsh-disable-goal-bundle` | 独立 bundle：关闭系统自带 dsh-goal（patch 层 + 小型 `preset-filter` 运行时插件）；主 bundle 已内嵌同一层，并把它声明为运行时依赖 |
 
 `pnpm publish -r` 会按依赖拓扑自动排序，**功能包先发、主 bundle 最后发布**；
 bundle 的 `workspace:*` 依赖在打包时会被改写为当前精确版本（`0.1.0` 等）。
-`@yankeguo/dsh-disable-goal-bundle` 没有 workspace 依赖，但含一个小型运行时插件
+`@yankeguo/dsh-disable-goal-bundle` 自身没有 workspace 依赖，但含一个小型运行时插件
 （`preset-filter`，构建产物 `lib/preset-filter.js`）与 patch 文件，因此同样需要先 `pnpm build`。
+主 bundle 现在在 `dependencies` 里声明了它（内嵌的 filter 行 import 其 `preset-filter` 模块），
+所以发布主 bundle 时它必须已经发布且版本一致。
 
 ## 两种发布方式
 
@@ -149,7 +151,8 @@ pnpm test                          # 单元测试（vitest）
 pnpm build                         # 生成 packages/*/lib（lib 被 gitignore，必须现构建；共 9 个 lib/*.js，含 disable-goal-bundle 的 preset-filter.js）
 pnpm release:dry                   # 递归 dry-run：打印 8 个包的发布计划，不上传
 
-# 可选：确认 disable-goal-bundle 的生成 patch 与脚本一致（CI 不跑，发布前手动检查）
+# 确认两个生成 patch（独立 bundle + 主 bundle 内嵌层）与 manifest 接线一致
+# （pnpm test 也会 spawn 这项校验；发布前仍建议手动执行）
 node scripts/build-disable-goal-bundle.mjs --check
 ```
 
@@ -162,7 +165,7 @@ pnpm --filter @yankeguo/dsh-disable-goal-bundle pack --pack-destination /tmp/inf
 
 MAIN=/tmp/infini-pkgs/*dsh-infini-goal-bundle-*.tgz
 DISABLE=/tmp/infini-pkgs/*dsh-disable-goal-bundle-*.tgz
-tar -tzf $MAIN        # 必须包含 package/cordis.patch.yml、icon.svg、README.md
+tar -tzf $MAIN        # 必须包含 package/cordis.patch.yml、package/cordis.disable-goal.patch.yml、icon.svg、README.md
 tar -tzf $DISABLE     # 必须包含 package/cordis.patch.yml 与 package/lib/preset-filter.js
 tar -xzOf $MAIN package/package.json   # workspace:* 应已改写为精确版本
 ```

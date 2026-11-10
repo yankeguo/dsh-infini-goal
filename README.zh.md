@@ -9,7 +9,10 @@
 - **没有最大轮次**：目标保持 `active` 直到被完成、暂停、阻塞或清除；
 - **最小触发间隔**：两次自动轮次的开始时间至少相隔 `minIntervalMs`，空循环不会疯狂重试；
 - **静默时段**（`quietWindows`）：配置的本地时间段内不自动触发；人类对话与工具调用照常工作，
-  时段结束后自动继续。可用于免打扰、专注时段、非工作时段、夜间等任意场景。
+  时段结束后自动继续。可用于免打扰、专注时段、非工作时段、夜间等任意场景；
+- **默认关闭官方 goal**：安装本 bundle 即同时以普通 bundle 层关闭 DSH 自带的 `dsh-goal`，
+  无需再装第二个 bundle，infini-goal 就是唯一的目标系统；它贡献的每一行都可以在 Plugins 页面
+  单独开关。
 
 文档导航：[设计说明](docs/DESIGN.md) · [发布指南](docs/PUBLISHING.md) ·
 [关闭系统自带的 dsh-goal](docs/DISABLE-BUILTIN-GOAL.md) ·
@@ -28,7 +31,7 @@
 | 人类命令 | `/infini-goal`，可在不消耗模型轮次的情况下查看状态、配置节奏、暂停/恢复 |
 | 状态条 UI | composer 上方的 InfiniGoalBar：阶段、轮次、触发节奏、静默时段提示、暂停/恢复/清除 |
 | 权限模型 | 所有变更都需要人类授权或当前自动轮次授权，模型无法自说自话改目标（见[权限模型](#权限模型)） |
-| 可共存 | 与官方 `dsh-goal` 的工具、命令、状态条互不同名；也可用伴生 bundle 关掉官方 goal |
+| 可共存 | 与官方 `dsh-goal` 的工具、命令、状态条互不同名；安装本 bundle 会默认关闭官方 goal |
 
 ## 界面
 
@@ -70,8 +73,8 @@ packages/
   tool/        @yankeguo/dsh-tool-infini-goal       模型工具
   command/     @yankeguo/dsh-command-infini-goal    /infini-goal 人类命令
   client-ui/   @yankeguo/dsh-client-ui-infini-goal  浏览器状态条
-  bundle/      @yankeguo/dsh-infini-goal-bundle     bundle：cordis.patch.yml + 依赖
-  disable-goal-bundle/  @yankeguo/dsh-disable-goal-bundle  可选伴生 bundle：关闭系统自带 dsh-goal
+  bundle/      @yankeguo/dsh-infini-goal-bundle     bundle：cordis.patch.yml + 生成的 cordis.disable-goal.patch.yml + 依赖
+  disable-goal-bundle/  @yankeguo/dsh-disable-goal-bundle  独立 bundle：只关闭系统自带 dsh-goal（同时提供主 bundle 的 preset-filter 运行时模块）
 ```
 
 `pnpm build` 产出 9 个 `lib/*.js`：protocol 的 `index`/`client`、core、driver、tool、command、
@@ -95,15 +98,16 @@ protocol/core 实例——其余依赖（例如 core 内联的 `zod`）打进产
 ### 安装：从 npm（发布后，推荐）
 
 ```sh
-# 主 bundle：核心服务 + 驱动器 + 模型工具 + 命令 + 状态条
+# 主 bundle：核心服务 + 驱动器 + 模型工具 + 命令 + 状态条；
+# 同时默认关闭系统自带的 dsh-goal
 dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle
-
-# 可选伴生 bundle：关闭系统自带的 dsh-goal
-dsh plugin --profile desktop add @yankeguo/dsh-disable-goal-bundle
 ```
 
-安装后在 **Plugins** 页面确认对应 bundle 已启用（新安装的 bundle 通常默认启用；
-若显示为未启用，勾选即可），然后刷新 Web 页面。进阶用法也可以单独安装某个插件包，并在
+只装这一个 bundle 就够了：它内置了与 `@yankeguo/dsh-disable-goal-bundle` 相同的关闭层，
+官方 goal 模式会被直接关掉，不需要再装伴生 bundle。安装后在 **Plugins** 页面确认 bundle
+已启用（新安装的 bundle 通常默认启用；若显示为未启用，勾选即可），然后刷新 Web 页面。
+在 bundle 详情页里，它贡献的每一行（5 个 infini-goal 行与 3 个生成的 preset-filter 行）都可以
+单独开关；关掉整个 bundle 则恢复官方 goal 模式。进阶用法也可以单独安装某个插件包，并在
 profile 的 `cordis.patch.yml` 里自行插入对应的 loader row；日常使用推荐直接装主 bundle。
 
 ### 安装：本地 checkout（开发 / 验收）
@@ -112,17 +116,20 @@ profile 的 `cordis.patch.yml` 里自行插入对应的 loader row；日常使�
 pnpm install
 pnpm build
 pnpm install:profile                  # 默认 --profile desktop
-# 或指定 profile / home；--disable-builtin-goal 同时关闭官方 goal
+# 或指定 profile / home
 node scripts/install-profile.mjs --profile desktop --dsh-home ~/.dsh
-pnpm install:profile --disable-builtin-goal
 ```
+
+`--disable-builtin-goal` 仍被接受，但已废弃且不再产生效果（仅为兼容旧脚本）。
 
 脚本做三件事：
 
 1. 把全部 8 个 workspace 包（6 个插件包 + 2 个 bundle 包）符号链接到
    `$DSH_HOME/profiles/<profile>/node_modules/@yankeguo/`；
-2. 把 `@yankeguo/dsh-infini-goal-bundle` 追加进 profile 的 `dsh.profile.bundles`
-   （带 `--disable-builtin-goal` 时再追加伴生 bundle，并清掉旧脚本写进 profile patch 的同功能块）；
+2. 把 `@yankeguo/dsh-infini-goal-bundle` 追加进 profile 的 `dsh.profile.bundles`。该 bundle
+   内置关闭层，官方 goal 默认关闭；若旧 profile 仍选中伴生 bundle，会被自动取消选择（包仍保留
+   安装，因为主 bundle 要 import 它的 `preset-filter` 模块），profile patch 里遗留的生成块也会
+   被清除；
 3. 写入前备份 profile 的 `package.json`（有改动时）。
 
 DSH 的 profile HMR 会实时加载 Host 插件；浏览器侧刷新页面后出现状态条。
@@ -144,6 +151,12 @@ pnpm uninstall:profile                # 移除链接与 bundle 选择
 ```
 
 升级 DSH 大版本（0.3）前需要更新插件 / bundle 包的 `engines.dsh` 并回归；不兼容的 bundle 会被 DSH 跳过。
+
+从「主 bundle 尚未内置关闭层」的旧版本升级时：如果 profile 仍选中
+`@yankeguo/dsh-disable-goal-bundle`，请在 Plugins 页面停用/移除它（或重跑
+`pnpm install:profile`，脚本会自动取消选择）。两个 bundle 故意共用同一批 row id，DSH 能容忍
+重复行、每类 filter 只挂载一次（后插入者生效），但 Plugins 页面将无法单独开关这 3 个 filter 行
+——请只保留一个。伴生 bundle 仍适用于「只想关掉官方 goal、不安装 infini-goal 套件」的 profile。
 
 ### 从 0.1.0 升级 / 修复旧会话
 
@@ -339,7 +352,7 @@ Host 命令侧 pause / complete / block / clear 只 abort 正在运行的自动�
 | fork 后目标继续跑 | 预期行为；fork 前先 `/infini-goal pause` |
 | 重启后 Session 无法恢复，日志报 "refusing to interpret the log" | 该 Session 由 0.1.0 的旧表示写入；退出 DSH 后运行 `node scripts/repair-session-log.mjs --write --dsh-home ~/.dsh`（见「从 0.1.0 升级 / 修复旧会话」） |
 | `repair-session-log.mjs` 报 session.lock | 对应 Session 仍被 DSH 打开；退出 DSH / 关闭 Session 后重跑，或确认属主进程已退出后加 `--force` |
-| 关闭官方 goal 后仍看到 `/goal` | preset 变更只影响新 Agent，重启一次 DSH 并新建会话 |
+| 关闭官方 goal 后仍看到 `/goal` | 主 bundle 默认关闭官方 goal，但 preset 变更只影响新 Agent；重启一次 DSH 并新建会话。若在 Plugins 页面停用了该 bundle 或它的 preset-filter 行，请重新启用 |
 
 ## 发布
 
@@ -363,31 +376,44 @@ scripts/trusted-publishers.sh          # 批量配置全部 8 个包（--dry-run
 完整发版流程（版本升级、dry-run、本地/CI 发布、GitHub Release、故障处理）见
 [`docs/PUBLISHING.md`](docs/PUBLISHING.md)。
 
-## 关闭系统自带的 dsh-goal（可选）
+## 系统自带的 dsh-goal 默认关闭
 
-DSH 自带官方 goal 模式，与本插件可以共存（工具、命令、状态条都不同名）。若希望
-infini-goal 成为唯一目标系统，安装可选的伴生 bundle 即可，profile 的
-`cordis.patch.yml` 保持干净：
+DSH 自带官方 goal 模式，技术上可以与本插件共存（工具、命令、状态条都不同名）。安装
+`@yankeguo/dsh-infini-goal-bundle` 会以普通 bundle 层把它关闭，infini-goal 因此成为唯一目标系统，
+profile 的 `cordis.patch.yml` 保持干净：
 
 ```sh
-dsh plugin --profile desktop add @yankeguo/dsh-disable-goal-bundle   # 发布后
-pnpm install:profile --disable-builtin-goal                          # 本地 checkout
+dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle   # 发布后；只装这一个即可
 ```
 
-随后在 **Plugins** 页面勾选/取消该 bundle 即可实时开关官方 goal 模式。
-该 bundle **不复制 preset 内容**：它停用 shipped preset 声明，并用一个很小的运行时
-filter 读取已安装 preset、只过滤掉 `command-goal` / `tool-goal`，因此 DSH 升级后无需重新生成。
-原理（为什么不能直接禁 `goal` 服务、preset patch 粒度等）、生效时机（preset 变更只影响
-新 Agent，建议重启一次 DSH）、脚本方式与升级后维护见
+主 bundle 的 `dsh.bundle.patch` 依次列出两个文件：`cordis.patch.yml`（5 个 infini-goal 行）与
+生成的 `cordis.disable-goal.patch.yml`（关闭层）。两者都是普通 Loader 行，因此在 **Plugins** 的
+bundle 详情页可以单独开关：
+
+- 5 个 infini-goal 行（`infini-goal`、`infini-goal-driver`、`infini-goal-tool`、
+  `infini-goal-command`、`infini-goal-ui`）——例如保留套件但隐藏状态条；
+- 3 个生成的 `preset-*-filter` 行：重新挂载 shipped agent preset，但去掉
+  `command-goal` / `tool-goal`。
+
+关掉整个 bundle 即实时恢复官方 goal 模式。关闭层 **不复制 preset 内容**：它停用 shipped preset
+声明，并用一个很小的运行时 filter 读取已安装 preset、只过滤掉 `command-goal` / `tool-goal`，
+因此 DSH 升级后无需重新生成。原理（为什么不能直接禁 `goal` 服务、preset patch 粒度等）、生效时机
+（preset 变更只影响新 Agent，建议重启一次 DSH）、脚本方式与升级后维护见
 [`docs/DISABLE-BUILTIN-GOAL.md`](docs/DISABLE-BUILTIN-GOAL.md)。
+
+`@yankeguo/dsh-disable-goal-bundle` 仍保留，供「只想关闭官方 goal、不安装 infini-goal 套件」的
+profile 单独使用（内容相同）。不要在同一个 profile 里同时启用两个 bundle：它们故意共用同一批
+row id，DSH 能容忍重复行、每类 filter 只挂载一次（后插入者生效），但 Plugins 页面将无法单独开关
+这 3 个 filter 行。`pnpm install:profile` 会自动取消伴生 bundle 的选择。
 
 ## 开发与验证
 
 ```sh
 pnpm typecheck     # 全仓 TS 检查
-pnpm test          # 协议数学 / fold / 工具与命令解析 / driver 状态机 / UI 格式化等单测（22 个文件 / 376 个用例）
+pnpm test          # 单测（23 个文件 / 381 个用例），含生成 bundle 的组合一致性检查
 pnpm build         # esbuild 产物（9 个 lib/*.js）
 pnpm dev:patch     # 生成 .tmp/cordis.patch.yml（绝对路径插入，免安装调试）
+node scripts/build-disable-goal-bundle.mjs --check   # 生成的 bundle patch 与 manifest 是否最新
 ```
 
 端到端验证（隔离 DSH_HOME + mock LLM，不触碰当前运行中的 DSH）：
@@ -396,6 +422,8 @@ pnpm dev:patch     # 生成 .tmp/cordis.patch.yml（绝对路径插入，免安�
 tools/e2e/bootstrap.sh          # 创建 /tmp 下的隔离 profile
 tools/e2e/smoke.sh              # 基础设施 smoke（插入 plugin / session / mock LLM）
 tools/e2e/suite.sh --fresh      # 本插件套件的端到端场景（最小间隔 / 静默时段 / 暂停）
+tools/e2e/probe-install.sh      # 安装态验证：官方 goal 默认关闭、/infini-goal 与驱动器可用
+tools/e2e/probe-bundles.sh      # bundle 打包验证：主 bundle 单独安装、旧伴生 bundle 迁移、重复 id 容忍
 ```
 
 设计说明与数据结构见 [`docs/DESIGN.md`](docs/DESIGN.md)，E2E 工具与已知限制见

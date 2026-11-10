@@ -18,7 +18,14 @@
  *   4. the control plugin (added as a plain patch overlay for observability)
  *      reports the same goal from `ctx.infiniGoals`.
  *
- * Usage: node probe-install.mjs --state-dir <dir> --workspace <dir> [--json]
+ * Optional absence assertions (used by the installed-profile regression, where
+ * the main bundle switches the built-in dsh-goal mode off by default):
+ *   --assert-no-command <name>   fail when `commands/list` advertises /<name>
+ *   --assert-no-tool <name>      fail when the model tool list includes <name>
+ * Both are repeatable and change nothing when omitted.
+ *
+ * Usage: node probe-install.mjs --state-dir <dir> --workspace <dir>
+ *          [--assert-no-command <name>] [--assert-no-tool <name>] [--json]
  */
 import { setTimeout as sleep } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
@@ -38,6 +45,8 @@ const { values } = parseArgs({
     'state-dir': { type: 'string', default: '/tmp/dsh-e2e/state' },
     workspace: { type: 'string', default: '/tmp/dsh-e2e/workspace' },
     objective: { type: 'string', default: 'Install-mode objective via host command' },
+    'assert-no-command': { type: 'string', multiple: true, default: [] },
+    'assert-no-tool': { type: 'string', multiple: true, default: [] },
     json: { type: 'boolean', default: false },
   },
   allowPositionals: false,
@@ -85,6 +94,10 @@ const sessionId = created.sessionId
 const commands = await rpc(origin, cookie, 'commands/list', { agentId: sessionId })
 const commandNames = Array.isArray(commands) ? commands.map(entry => entry?.name).filter(name => typeof name === 'string') : []
 const infiniCommand = Array.isArray(commands) ? commands.find(entry => entry?.name === 'infini-goal') : undefined
+for (const name of values['assert-no-command']) {
+  check(`commands/list does not advertise /${name}`, !commandNames.includes(name),
+    `commands: ${commandNames.join(',') || 'none'}`)
+}
 check('commands/list advertises /infini-goal', infiniCommand !== undefined, {
   name: infiniCommand?.name,
   description: infiniCommand?.description?.slice(0, 120),
@@ -153,6 +166,10 @@ const latestPage = await readEvents(origin, cookie, sessionId, { throughSeq: sta
 const advertisedTools = requestHeaderToolNames(latestPage.records)
 for (const tool of ['get_infini_goal', 'create_infini_goal', 'update_infini_goal']) {
   check(`installed tool row advertises ${tool}`, advertisedTools.includes(tool),
+    `advertised: ${advertisedTools.join(',') || 'none'}`)
+}
+for (const tool of values['assert-no-tool']) {
+  check(`model tools do not include ${tool}`, !advertisedTools.includes(tool),
     `advertised: ${advertisedTools.join(',') || 'none'}`)
 }
 

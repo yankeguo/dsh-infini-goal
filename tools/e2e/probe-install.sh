@@ -7,18 +7,25 @@
 # node_modules and the bundle name is selected in `dsh.profile.bundles`. No
 # development `--patch` overlay inserts the plugin rows.
 #
+# The main bundle embeds the built-in-goal disable layer, so this installed
+# composition is ALSO the regression proof that DSH's native goal mode is off by
+# default: the boot graph must not carry the built-in goal client row,
+# `commands/list` must not advertise `/goal`, and the model tool list must not
+# carry get_goal/create_goal/update_goal.
+#
 # Then boots the isolated Web instance with only the generated mock/isolation
 # patches plus the observability control plugin, and asserts:
-#   (a) web.log has no plugin load/startup errors,
+#   (a) web.log has no plugin load/startup errors, no duplicate preset and no
+#       "waiting for goals" line,
 #   (b) window.__DSH_BOOT__ contains the suite client row and its bundle is
-#       served (client row active),
-#   (c) `commands/list` advertises `/infini-goal`, `commands/execute` creates /
-#       statuses / pauses the goal (command row active),
+#       served (client row active), and does NOT contain the built-in goal
+#       client row,
+#   (c) `commands/list` advertises `/infini-goal` (not `/goal`),
+#       `commands/execute` creates / statuses / pauses the goal,
 #   (d) an automatic round appears (driver row active),
 #   (e) ctx.infiniGoals reports the same goal (core row active) and the model
-#       was offered the three infini-goal tools (tool row active) — the tool
-#       list is checked by probe-tools.sh; here the installed composition's
-#       command + driver path is the focus.
+#       was offered the three infini-goal tools but not the built-in goal tools
+#       (tool row active).
 #
 # Usage: tools/e2e/probe-install.sh
 # Requires: repo built (`pnpm build`), scripts/install-profile.mjs present.
@@ -70,9 +77,9 @@ DSH_E2E_SCENARIO="${CONFIG_DIR}/scenario-install.json" \
 echo "e2e install: isolated instance ready: $(cat "${STATE_DIR}/web.url")"
 
 # 4) no plugin load/startup errors in the host log
-if grep -Eiq 'plugin tree failed|StartupError|failed to (load|import|start) plugin|inactive entry' "${LOG_DIR}/web.log"; then
+if grep -Eiq 'plugin tree failed|StartupError|failed to (load|import|start) plugin|inactive entry|Duplicate agent preset|waiting for goals|agent-preset/invalid' "${LOG_DIR}/web.log"; then
   echo "e2e install: FAIL — plugin load error in ${LOG_DIR}/web.log" >&2
-  grep -Ein 'plugin tree failed|StartupError|failed to (load|import|start) plugin|inactive entry' "${LOG_DIR}/web.log" | head -20 >&2
+  grep -Ein 'plugin tree failed|StartupError|failed to (load|import|start) plugin|inactive entry|Duplicate agent preset|waiting for goals|agent-preset/invalid' "${LOG_DIR}/web.log" | head -20 >&2
   exit 1
 fi
 echo "PASS no plugin load/startup errors in web.log"
@@ -81,14 +88,33 @@ echo "PASS no plugin load/startup errors in web.log"
 "${DSH_E2E_NODE}" "${E2E_DIR}/probe-web.mjs" \
   --state-dir "${STATE_DIR}" \
   --assert-client-entry @yankeguo/dsh-client-ui-infini-goal \
-  --assert-client-bundle @yankeguo/dsh-client-ui-infini-goal 2>&1 | tee "${DSH_E2E_ROOT}/smoke/probe-install-web.log"
+  --assert-client-bundle @yankeguo/dsh-client-ui-infini-goal \
+  --assert-no-client-entry @deepseek-ai/dsh-client-ui-goal 2>&1 | tee "${DSH_E2E_ROOT}/smoke/probe-install-web.log"
 grep -q 'PASS client entry @yankeguo/dsh-client-ui-infini-goal' "${DSH_E2E_ROOT}/smoke/probe-install-web.log" || {
   echo "e2e install: FAIL — installed client row missing from boot graph" >&2; exit 1
 }
-echo "PASS installed client row is in window.__DSH_BOOT__"
+grep -q 'PASS client entry absent @deepseek-ai/dsh-client-ui-goal' "${DSH_E2E_ROOT}/smoke/probe-install-web.log" || {
+  echo "e2e install: FAIL — built-in goal client row unexpectedly present in boot graph" >&2; exit 1
+}
+echo "PASS installed client row is in window.__DSH_BOOT__; built-in goal client row is absent"
 
 # 6) command catalogue + host command execution + driver round + core service
-"${DSH_E2E_NODE}" "${E2E_DIR}/probe-install.mjs" --state-dir "${STATE_DIR}" --workspace "${WORKSPACE_DIR}" 2>&1 | tee "${PROBE_OUT}"
+"${DSH_E2E_NODE}" "${E2E_DIR}/probe-install.mjs" \
+  --state-dir "${STATE_DIR}" \
+  --workspace "${WORKSPACE_DIR}" \
+  --assert-no-command goal \
+  --assert-no-tool get_goal \
+  --assert-no-tool create_goal \
+  --assert-no-tool update_goal 2>&1 | tee "${PROBE_OUT}"
 grep -q 'PROBE INSTALL PASS' "${PROBE_OUT}" || {
   echo "e2e install: FAIL — see ${PROBE_OUT}" >&2; exit 1
 }
+grep -q 'PASS commands/list does not advertise /goal' "${PROBE_OUT}" || {
+  echo "e2e install: FAIL — built-in /goal command is still advertised" >&2; exit 1
+}
+for tool in get_goal create_goal update_goal; do
+  grep -q "PASS model tools do not include ${tool}" "${PROBE_OUT}" || {
+    echo "e2e install: FAIL — built-in goal tool ${tool} is still advertised" >&2; exit 1
+  }
+done
+echo "PASS native dsh-goal mode is off by default (no /goal command, no goal tools)"

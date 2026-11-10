@@ -1,18 +1,20 @@
-# 关闭系统自带的 dsh-goal（可选）
+# 关闭系统自带的 dsh-goal（主 bundle 默认行为）
 
 DSH 默认自带官方 goal 模式（`dsh-goal` / `dsh-tool-goal` / `dsh-command-goal` /
-`dsh-goal-round-driver` / `dsh-client-ui-goal`）。装了本插件后两套目标系统可以共存
-（工具名、命令名、状态条都不同名），但如果你希望 **infini-goal 成为唯一的目标系统**，
-推荐安装可选的伴生 bundle：
+`dsh-goal-round-driver` / `dsh-client-ui-goal`）。本插件套件与它可以共存（工具名、命令名、
+状态条都不同名），但从**主 bundle 默认内嵌了关闭层**开始：
 
-```sh
-dsh plugin --profile desktop add @yankeguo/dsh-disable-goal-bundle
-```
+- 安装 [`@yankeguo/dsh-infini-goal-bundle`](../packages/bundle/README.md) 就会把官方
+  goal 模式关掉，**不需要**再单独安装任何伴生 bundle；
+- 关闭层是普通 bundle 层的一部分，没有任何 preset 内容被复制；
+- 主 bundle 贡献的每一行（5 个 infini-goal 行 + 3 个生成的 `preset-*-filter` 行）都可以在
+  **Plugins** 页面单独开关；关掉整个 bundle 即恢复官方 goal 模式。
 
-启用即关闭官方 goal，**禁用（在 Plugins 里取消勾选）即恢复**，profile 的
-`cordis.patch.yml` 保持干净。本地 checkout 用 `pnpm install:profile --disable-builtin-goal`。
+独立 bundle [`@yankeguo/dsh-disable-goal-bundle`](../packages/disable-goal-bundle/README.md)
+仍然保留，适用于「只想关闭官方 goal、不安装 infini-goal 套件」的 profile：它的 patch 与主
+bundle 内嵌层**逐字节相同**，两者由同一生成器输出。
 
-想先了解机制再决定？见下面"为什么不能直接禁用 `goal` 服务"和"bundle 里是什么"。
+想先了解机制？见下面"为什么不能直接禁用 `goal` 服务""bundle 里是什么"和"三种使用方式"。
 
 ## 为什么不能直接禁用 `goal` 服务
 
@@ -25,7 +27,7 @@ agent-preset/invalid: command-goal (@deepseek-ai/dsh-command-goal): waiting for 
 tool-goal (@deepseek-ai/dsh-tool-goal): waiting for goals
 ```
 
-所以 bundle 保留 `goal` 服务（惰性、无害，历史 `goal/change` 事件仍能回放），只去掉：
+所以关闭层保留 `goal` 服务（惰性、无害，历史 `goal/change` 事件仍能回放），只去掉：
 
 - `goal-round-driver`：不再有官方自动轮次；
 - `ui-goal`：composer 上方不再有官方 GoalBar；
@@ -42,44 +44,51 @@ Loader tree），不是 profile 的 loader 行；patch 的 `config` 又是**整�
 > *"A user override replaces the complete child list and does not automatically merge future
 > changes to the builtin list."*
 
-本 bundle 选择后者：停用 shipped preset 声明，改挂一个运行时 `preset-filter`，由它读取
+本方案选择后者：停用 shipped preset 声明，改挂一个运行时 `preset-filter`，由它读取
 **已安装的** preset 再过滤，从而不冻结任何子列表。
 
-## 方式 A：伴生 bundle（推荐）
+## 三种使用方式
 
-### 安装（发布到 npm 后）
-
-```sh
-# CLI 安装（安装后在 Plugins 页面确认已启用）
-dsh plugin --profile desktop add @yankeguo/dsh-disable-goal-bundle
-
-# 或在 Web：Plugins → Add plugin → 输入 @yankeguo/dsh-disable-goal-bundle
-```
-
-### 本地 checkout
+### 方式 A：主 bundle（默认，推荐）
 
 ```sh
+# 从 npm 安装（发布后）
+dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle
+
+# 本地 checkout
 pnpm build
-node scripts/install-profile.mjs --disable-builtin-goal
+pnpm install:profile
 ```
 
-该命令会：链接全部 8 个 workspace 包到 profile `node_modules`、选中主 bundle 与
-disable-goal bundle、并把之前脚本写进 profile patch 的旧块自动移除（有备份）。
+主 bundle 的 `dsh.bundle.patch` 是一个有序数组：
+`./cordis.patch.yml`（5 个 infini-goal 行）后接生成的
+`./cordis.disable-goal.patch.yml`（关闭层）。因此安装主 bundle 后：
 
-### 开关
+- 官方 goal 模式默认关闭，profile 的 `cordis.patch.yml` 保持干净；
+- Plugins 页面 → 主 bundle 详情页：可以单独开关它贡献的每一行（例如只关掉状态条 UI，
+  保留 `/infini-goal` 与自动轮次）；
+- 关掉整个 bundle → 官方 goal 模式恢复；重新打开 → 再次关闭。
 
-- **关闭官方 goal**：Plugins 页面勾选 `@yankeguo/dsh-disable-goal-bundle`（或保留在
-  profile `dsh.profile.bundles` 里）；
-- **恢复官方 goal**：取消勾选 / 从 `dsh.profile.bundles` 移除，HMR 会移除该层；
-- preset 变更只影响**之后创建的 Agent**，彻底生效建议重启一次 DSH。
+`pnpm install:profile` 还会取消旧 profile 里伴生 bundle 的选择，并清掉 profile patch 里
+旧脚本写入的同功能块。`--disable-builtin-goal` 仍被接受，但已废弃且无效果。
 
-### 验证
+### 方式 B：独立 bundle（只想关掉官方 goal）
 
-- 新建会话 → `/` 菜单没有 `/goal`，只有 `/infini-goal`；
-- 模型工具列表没有 `get_goal` / `create_goal` / `update_goal`，有 `*_infini_goal`；
-- composer 上方只有 infini-goal 状态条。
+如果 profile 里不装 infini-goal 套件、只想关闭官方 goal，安装独立 bundle：
 
-## 方式 B：脚本写 profile patch（自定义 profile / 不装 bundle）
+```sh
+dsh plugin --profile desktop add @yankeguo/dsh-disable-goal-bundle
+```
+
+它的内容与主 bundle 内嵌层相同，启用即关闭、禁用即恢复。
+
+> **不要同时启用主 bundle 与独立 bundle。** 两者故意共用同一批 row id：DSH 组合时会得到
+> 重复的 insert 行，但 Loader 每个 id 只保留一个 entry（后插入者生效），所以 preset filter
+> 仍然只挂载一次、不会报错；代价是 Plugins 页面无法再单独开关这 3 个 filter 行
+> （显示为 `unaddressable`），且 `--dump-config` 里会出现重复行。用不同的 id 反而会挂载
+> 两份 filter 并以 `Duplicate agent preset` 失败，所以 id 必须保持相同。
+
+### 方式 C：脚本写 profile patch（自定义 profile / 不装 bundle）
 
 适合没有走 bundle 安装、或想给非 desktop profile 单个开关的场景：
 
@@ -100,14 +109,16 @@ node scripts/disable-builtin-goal.mjs --write --profile-patch ~/.dsh/profiles/<n
 生成块用 `# BEGIN dsh-infini-goal: disable builtin dsh-goal` 与
 `# END dsh-infini-goal: disable builtin dsh-goal` 两行标记包住，`--write` 会替换旧块、
 `--remove` 精确删除；`--exclude ptc,cordis` 可只覆盖部分 preset。
-默认是静态快照（自包含、需随 DSH 升级重新生成）；加 `--dynamic` 可输出和伴生 bundle 相同的
-小动态块（要求 `@yankeguo/dsh-disable-goal-bundle` 已链接进该 profile）。
-**不要和方式 A 同时用**（内容相同但重复）；`install-profile.mjs --disable-builtin-goal`
-会自动清掉旧块。
+默认是静态快照（自包含、需随 DSH 升级重新生成）；加 `--dynamic` 可输出和 bundle 相同的
+小动态块（要求 `@yankeguo/dsh-disable-goal-bundle` 在该 profile 可解析）。
+**不要和方式 A / B 同时用**：bundle 已提供同样的层，重复的 insert 行会让对应 row 变成
+不可单独开关；`install-profile.mjs` 会自动清掉旧块。
 
 ## bundle 里是什么（动态，不复制 preset）
 
 [`packages/disable-goal-bundle/cordis.patch.yml`](../packages/disable-goal-bundle/cordis.patch.yml)
+与主 bundle 的
+[`packages/bundle/cordis.disable-goal.patch.yml`](../packages/bundle/cordis.disable-goal.patch.yml)
 只有几十行，**不复制任何 preset 子插件列表**：
 
 ```yaml
@@ -134,23 +145,30 @@ node scripts/disable-builtin-goal.mjs --write --profile-patch ~/.dsh/profiles/<n
 该运行时插件由 `@yankeguo/dsh-disable-goal-bundle/preset-filter` 导出（见包 `package.json`
 的 `exports` 与 `packages/disable-goal-bundle/src/preset-filter.js`；`pnpm build` 会把该文件
 逐字节复制为 `lib/preset-filter.js`，`install-profile.mjs` 会检查它存在）。
+主 bundle 在 `dependencies` 里声明了 `@yankeguo/dsh-disable-goal-bundle`，所以即使不启用
+独立 bundle，这个运行时模块也会随主 bundle 一起安装。
 
-包信息见 [`packages/disable-goal-bundle/README.md`](../packages/disable-goal-bundle/README.md)。
+包信息见 [`packages/bundle/README.md`](../packages/bundle/README.md) 与
+[`packages/disable-goal-bundle/README.md`](../packages/disable-goal-bundle/README.md)。
 
 ## 维护：通常无需重新生成
 
-动态 patch 不随 DSH 版本变化，**DSH 升级后不需要重新生成**。`scripts/build-disable-goal-bundle.mjs`
-仅用于重新生成/校验这个 patch 文件本身；CI 目前不运行该校验，发布前建议手动执行：
+动态 patch 不随 DSH 版本变化，**DSH 升级后不需要重新生成**。
+`scripts/build-disable-goal-bundle.mjs` 从同一份生成器输出**两个文件**（独立 bundle 的
+`cordis.patch.yml` 与主 bundle 内嵌的 `cordis.disable-goal.patch.yml`），并校验
+`packages/bundle/package.json` / `packages/disable-goal-bundle/package.json` 的接线
+（`dsh.bundle.patch`、`files`、`exports`、依赖）。`pnpm test` 会 spawn 这项校验；
+发布前也建议手动执行：
 
 ```sh
-node scripts/build-disable-goal-bundle.mjs          # 重新生成（默认动态版本）
-node scripts/build-disable-goal-bundle.mjs --check  # 发布前手动检查是否最新（不是 CI 步骤）
+node scripts/build-disable-goal-bundle.mjs          # 重新生成两个文件
+node scripts/build-disable-goal-bundle.mjs --check  # 检查两个文件与 bundle manifest 是否最新
 ```
 
 如果未来 DSH 改动了 Loader 模块解析或 preset 文件布局，导致 filter 失效，可用快照回退：
 
 ```sh
-node scripts/build-disable-goal-bundle.mjs --static   # 从已安装 app.asar 生成完整快照
+node scripts/build-disable-goal-bundle.mjs --static   # 从已安装 app.asar 生成完整快照（两个文件）
 ```
 
 `--static` 会复制 shipped 子列表，之后 DSH 升级需要重新生成。
@@ -159,7 +177,13 @@ node scripts/build-disable-goal-bundle.mjs --static   # 从已安装 app.asar �
 
 - 动态 filter 依赖 Loader 的模块解析与 shipped preset 文件布局；DSH 大版本升级后建议先跑
   一次隔离验证，必要时用 `--static` 回退。`minimal` preset 没有 goal 行，不需要替换。
-- 已有官方 goal 会变成惰性状态（服务在、driver/工具/UI 不在）。需要清理时先禁用本
-  bundle、用 `/goal clear` 清空，再重新启用。
+- 已有官方 goal 会变成惰性状态（服务在、driver/工具/UI 不在）。需要清理时先停用关闭层、
+  用 `/goal clear` 清空，再重新启用。
 - `goal` 服务仍挂载（preset 激活需要它）。如果未来 DSH 把 goal 从 preset 中移走，
-  这个 bundle 自然变成 no-op（filter 只是原样挂载 preset），可以直接禁用。
+  这层自然变成 no-op（filter 只是原样挂载 preset），可以直接停用。
+- preset 变更只影响之后创建的 Agent；彻底生效建议重启一次 DSH。
+- bundle 顺序：本 bundle 必须排在 `@deepseek-ai/dsh-base` / `@deepseek-ai/dsh-web-app` 之后
+  （Plugins 安装与 `install-profile.mjs` 都会追加到 `dsh.profile.bundles` 末尾）。若手工把它放到
+  这两个 data/UI bundle 之前，`goal-round-driver` / `ui-goal` / `preset-*` 的 override 会因为
+  目标行尚未插入而跳过（DSH 只告警），随后 filter 与未停用的 preset 同时挂载会触发
+  `Duplicate agent preset`。

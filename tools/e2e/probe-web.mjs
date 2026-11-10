@@ -5,6 +5,7 @@
  *   node probe-web.mjs --state-dir /tmp/dsh-e2e/state \
  *     --assert-client-entry e2e-trivial-plugin \
  *     --assert-client-bundle e2e-trivial-plugin \
+ *     --assert-no-client-entry @deepseek-ai/dsh-client-ui-goal \
  *     --assert-host-route /e2e-trivial/health
  *
  * Checks performed:
@@ -30,6 +31,7 @@ const { values } = parseArgs({
     'state-dir': { type: 'string', default: '/tmp/dsh-e2e/state' },
     'assert-client-entry': { type: 'string', multiple: true, default: [] },
     'assert-client-bundle': { type: 'string', multiple: true, default: [] },
+    'assert-no-client-entry': { type: 'string', multiple: true, default: [] },
     'assert-host-route': { type: 'string', multiple: true, default: [] },
     'print-entries': { type: 'boolean', default: false },
     json: { type: 'boolean', default: false },
@@ -45,6 +47,7 @@ Options:
   --state-dir <dir>               start-web.sh state directory (default /tmp/dsh-e2e/state)
   --assert-client-entry <id>      fail unless window.__DSH_BOOT__.entries has this package id (repeatable)
   --assert-client-bundle <id>     fail unless the entry's served bundle registers the package (repeatable)
+  --assert-no-client-entry <id>   fail when window.__DSH_BOOT__.entries has this package id (repeatable)
   --assert-host-route <path>      fail unless GET <origin><path> answers 200 (repeatable)
   --print-entries                 print every boot graph entry
   --json                          machine-readable report
@@ -73,6 +76,12 @@ check('boot-graph has entries', entries.length > 0, `${entries.length} entries, 
 for (const id of values['assert-client-entry']) {
   const entry = byId.get(id)
   check(`client entry ${id}`, entry !== undefined, entry === undefined ? 'missing from window.__DSH_BOOT__.entries' : `url=${entry.url} rev=${entry.rev}`)
+}
+
+for (const id of values['assert-no-client-entry']) {
+  const entry = byId.get(id)
+  check(`client entry absent ${id}`, entry === undefined,
+    entry === undefined ? 'not in window.__DSH_BOOT__.entries' : `unexpected entry: url=${entry.url}`)
 }
 
 for (const id of values['assert-client-bundle']) {

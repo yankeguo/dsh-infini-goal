@@ -1,26 +1,32 @@
 {
   "name": "@yankeguo/dsh-infini-goal-bundle",
   "version": "0.1.1",
-  "description": "Endless goal mode for DeepSeek Harness: no round cap, a minimum trigger interval, and quiet time windows that suppress automatic rounds.",
+  "description": "Endless goal mode for DeepSeek Harness: no round cap, a minimum trigger interval, and quiet time windows that suppress automatic rounds; installing it also switches the built-in dsh-goal mode off by default.",
   "license": "MIT",
   "type": "module",
   "icon": "./icon.svg",
   "dsh": {
     "bundle": {
-      "patch": "./cordis.patch.yml",
+      "patch": [
+        "./cordis.patch.yml",
+        "./cordis.disable-goal.patch.yml"
+      ],
       "listedByDefault": false
     }
   },
   "exports": {
     "./cordis.patch.yml": "./cordis.patch.yml",
+    "./cordis.disable-goal.patch.yml": "./cordis.disable-goal.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
     "cordis.patch.yml",
+    "cordis.disable-goal.patch.yml",
     "icon.svg",
     "README.md"
   ],
   "dependencies": {
+    "@yankeguo/dsh-disable-goal-bundle": "workspace:*",
     "@yankeguo/dsh-infini-goal": "workspace:*",
     "@yankeguo/dsh-infini-goal-driver": "workspace:*",
     "@yankeguo/dsh-tool-infini-goal": "workspace:*",

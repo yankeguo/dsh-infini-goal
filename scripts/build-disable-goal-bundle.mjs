@@ -1,13 +1,27 @@
 #!/usr/bin/env node
 /**
- * Regenerate the optional `@yankeguo/dsh-disable-goal-bundle` patch.
+ * Regenerate the two committed "disable the built-in dsh-goal mode" bundle
+ * patches from one source of truth:
+ *
+ *   1. `packages/disable-goal-bundle/cordis.patch.yml` — the standalone
+ *      companion bundle (for profiles that want the built-in goal off without
+ *      the infini-goal suite);
+ *   2. `packages/bundle/cordis.disable-goal.patch.yml` — the same layer,
+ *      embedded by `@yankeguo/dsh-infini-goal-bundle` through its
+ *      `dsh.bundle.patch` file list (so installing the main bundle switches the
+ *      built-in goal off by default).
+ *
+ * Both files use the SAME row ids on purpose: when a profile still enables both
+ * bundles, DSH composes duplicate insert rows but the Loader keeps a single
+ * entry per id (the last row wins), so the preset filters mount once. Distinct
+ * ids would mount two filters per preset and fail with "Duplicate agent preset".
  *
  * Default (dynamic): the patch disables the shipped `preset-*` declaration rows
  * and mounts `@yankeguo/dsh-disable-goal-bundle/preset-filter` for each. The
  * filter plugin reads the installed `@deepseek-ai/dsh-web-app` preset
  * declaration at boot and mounts the real agent-preset with `command-goal` /
  * `tool-goal` filtered out. Nothing is copied, so a DSH upgrade needs no
- * regeneration; this file only changes when the bundle's own layout changes.
+ * regeneration; these files only change when the bundles' own layout changes.
  *
  * `--static` emits the legacy snapshot instead: the full shipped child lists
  * minus the goal rows, baked from the installed app.asar. Use it as a fallback
@@ -15,32 +29,39 @@
  * filter relies on.
  *
  * Usage:
- *   node scripts/build-disable-goal-bundle.mjs            # dynamic patch (default)
- *   node scripts/build-disable-goal-bundle.mjs --print    # print instead of write
- *   node scripts/build-disable-goal-bundle.mjs --check    # exit 1 when stale
- *   node scripts/build-disable-goal-bundle.mjs --static   # snapshot fallback
+ *   node scripts/build-disable-goal-bundle.mjs            # dynamic patches (default)
+ *   node scripts/build-disable-goal-bundle.mjs --print    # print the companion patch
+ *   node scripts/build-disable-goal-bundle.mjs --print-main  # print the embedded patch
+ *   node scripts/build-disable-goal-bundle.mjs --check    # exit 1 when either patch or a manifest is stale
+ *   node scripts/build-disable-goal-bundle.mjs --static   # snapshot fallback (both files)
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   DEFAULT_ASAR,
-  buildDisableGoalEntries,
-  buildDynamicDisableGoalEntries,
   loadPresetPatches,
   readDshVersion,
+  renderDynamicDisableGoalPatch,
+  renderStaticDisableGoalPatch,
+  validateBundleManifests,
 } from './lib/disable-goal.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+/** Standalone companion bundle patch (only disables the built-in goal mode). */
 const DEFAULT_OUT = join(ROOT, 'packages', 'disable-goal-bundle', 'cordis.patch.yml')
+/** Layer embedded by the main bundle's `dsh.bundle.patch` file list. */
+const DEFAULT_MAIN_OUT = join(ROOT, 'packages', 'bundle', 'cordis.disable-goal.patch.yml')
 
 const USAGE = `Usage:
-  node scripts/build-disable-goal-bundle.mjs [--print] [--check] [--static]
+  node scripts/build-disable-goal-bundle.mjs [--print | --print-main] [--check] [--static]
   Options:
-    --print                print the generated patch instead of writing it
-    --check                exit 1 when packages/disable-goal-bundle/cordis.patch.yml is stale
+    --print                print the companion bundle patch instead of writing
+    --print-main           print the main bundle's embedded patch instead of writing
+    --check                exit 1 when either generated patch (or a bundle manifest) is stale
     --static               emit a snapshot of the shipped preset child lists instead of the dynamic filter
-    --out <path>           output file (default packages/disable-goal-bundle/cordis.patch.yml)
+    --out <path>           companion bundle patch output (default packages/disable-goal-bundle/cordis.patch.yml)
+    --main-out <path>      main bundle embedded patch output (default packages/bundle/cordis.disable-goal.patch.yml)
     --app-asar <path>      installed app.asar for --static (default ${DEFAULT_ASAR})
     --presets-dir <path>   read preset patches from a directory for --static
     --exclude <names>      comma-separated preset names to skip for --static
@@ -52,6 +73,7 @@ function parseArgs(argv) {
     mode: 'write',
     static: false,
     out: DEFAULT_OUT,
+    mainOut: DEFAULT_MAIN_OUT,
     appAsar: DEFAULT_ASAR,
     presetsDir: undefined,
     exclude: [],
@@ -62,6 +84,9 @@ function parseArgs(argv) {
       case '--print':
         options.mode = 'print'
         break
+      case '--print-main':
+        options.mode = 'print-main'
+        break
       case '--check':
         options.mode = 'check'
         break
@@ -70,6 +95,9 @@ function parseArgs(argv) {
         break
       case '--out':
         options.out = resolve(argv[++index])
+        break
+      case '--main-out':
+        options.mainOut = resolve(argv[++index])
         break
       case '--app-asar':
         options.appAsar = resolve(argv[++index])
@@ -92,75 +120,74 @@ function parseArgs(argv) {
   return options
 }
 
-/** Render the dynamic bundle patch: tiny, upgrade-proof, no shipped list copied. */
-function renderDynamicPatch() {
-  return [
-    '# GENERATED by scripts/build-disable-goal-bundle.mjs — do not edit by hand.',
-    '#',
-    '# Companion bundle for @yankeguo/dsh-infini-goal: disables the built-in',
-    '# dsh-goal mode as an ordinary bundle layer. Enable it to turn the built-in',
-    '# mode off; disable it to restore it.',
-    '#',
-    '# The shipped Web composition keeps the `goal` SERVICE on the host plane but',
-    '# mounts command-goal/tool-goal per agent preset. A profile patch cannot',
-    '# reach those child rows (they are preset config data, not Loader rows), and',
-    '# a preset row is an entry-group carrier whose config expressions are kept',
-    '# unevaluated on purpose. So instead of copying every preset child list, this',
-    '# layer disables the shipped preset declarations and mounts one tiny filter',
-    '# row each: @yankeguo/dsh-disable-goal-bundle/preset-filter reads the',
-    '# INSTALLED shipped preset declaration at boot (Loader module resolution,',
-    '# app.asar aware) and mounts the real @deepseek-ai/dsh-agent-preset with the',
-    '# goal rows filtered out. Nothing is copied: a DSH upgrade needs no',
-    '# regeneration. `--static` remains available as a snapshot fallback.',
-    '#',
-    '# `minimal` ships no goal rows and is left untouched.',
-    ...buildDynamicDisableGoalEntries(),
-    '',
-  ].join('\n')
+/**
+ * Render one target's generated patch.
+ * @param {{ static: boolean, appAsar: string, presetsDir?: string, exclude: string[] }} options
+ * @param {'companion' | 'main'} target generated file owner
+ * @returns {string} patch text
+ */
+function renderPatch(options, target) {
+  if (!options.static) return renderDynamicDisableGoalPatch(target)
+  const presetPatches = loadPresetPatches(options)
+  const version = options.presetsDir === undefined ? readDshVersion(options.appAsar) : 'unknown'
+  return renderStaticDisableGoalPatch(target, presetPatches, version)
 }
 
-/** Render the legacy static snapshot patch from the installed app.asar. */
-function renderStaticPatch(options) {
-  const presetPatches = loadPresetPatches(options)
-  if (presetPatches.size === 0) throw new Error('all presets were excluded; nothing to generate')
-  const version = options.presetsDir === undefined ? readDshVersion(options.appAsar) : 'unknown'
-  return [
-    '# GENERATED by scripts/build-disable-goal-bundle.mjs --static — do not edit by hand.',
-    '#',
-    '# Fallback snapshot of the shipped preset child lists minus command-goal /',
-    '# tool-goal. Prefer the default dynamic patch: this snapshot freezes those',
-    '# child lists and must be regenerated after every DSH upgrade.',
-    '#',
-    `# Generated against DSH runtime ${version}.`,
-    '#',
-    '# The shipped Web composition keeps the `goal` SERVICE on the host plane but',
-    '# mounts command-goal/tool-goal per agent preset; removing the service makes',
-    '# preset activation fail with "waiting for goals".',
-    ...buildDisableGoalEntries(presetPatches),
-    '',
-  ].join('\n')
+/**
+ * Read a file that may not exist yet.
+ * @param {string} path absolute path
+ * @returns {string} file text, or an empty string when absent
+ */
+function readIfPresent(path) {
+  try {
+    return readFileSync(path, 'utf8')
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Compare one generated patch with its committed copy.
+ * @param {string} label human-readable target label
+ * @param {string} path committed file path
+ * @param {string} expected generated text
+ * @returns {string | undefined} failure message
+ */
+function stalePatch(label, path, expected) {
+  const current = readIfPresent(path)
+  if (current === expected) return undefined
+  if (current === '') return `${label} is missing: ${path}`
+  return `${label} is stale: ${path} (run without --check to regenerate)`
 }
 
 try {
   const options = parseArgs(process.argv.slice(2))
-  const patch = options.static ? renderStaticPatch(options) : renderDynamicPatch()
-  if (options.mode === 'print') {
-    process.stdout.write(patch)
+  const companionPatch = renderPatch(options, 'companion')
+  const mainPatch = renderPatch(options, 'main')
+
+  if (options.mode === 'print' || options.mode === 'print-main') {
+    process.stdout.write(options.mode === 'print' ? companionPatch : mainPatch)
   } else if (options.mode === 'check') {
-    let current = ''
-    try {
-      current = readFileSync(options.out, 'utf8')
-    } catch {
-      current = ''
-    }
-    if (current !== patch) {
-      console.error(`build-disable-goal-bundle: ${options.out} is stale; run without --check to regenerate`)
+    const failures = [
+      stalePatch('companion bundle patch', options.out, companionPatch),
+      stalePatch('main bundle embedded patch', options.mainOut, mainPatch),
+      ...validateBundleManifests(ROOT),
+    ].filter(failure => failure !== undefined)
+    if (failures.length > 0) {
+      for (const failure of failures) console.error(`build-disable-goal-bundle: ${failure}`)
       process.exit(1)
     }
-    console.log(`build-disable-goal-bundle: ${options.out} is up to date`)
+    console.log('build-disable-goal-bundle: generated patches and bundle manifests are up to date')
   } else {
-    writeFileSync(options.out, patch)
+    writeFileSync(options.out, companionPatch)
+    writeFileSync(options.mainOut, mainPatch)
     console.log(`wrote ${options.out}`)
+    console.log(`wrote ${options.mainOut}`)
+    const failures = validateBundleManifests(ROOT)
+    if (failures.length > 0) {
+      for (const failure of failures) console.error(`build-disable-goal-bundle: ${failure}`)
+      process.exit(1)
+    }
   }
 } catch (error) {
   console.error(`build-disable-goal-bundle: ${error instanceof Error ? error.message : String(error)}`)

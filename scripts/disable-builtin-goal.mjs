@@ -3,10 +3,11 @@
  * Write (or remove) a marked patch block that disables the built-in dsh-goal
  * mode in one DSH profile.
  *
- * Prefer the optional bundle (`@yankeguo/dsh-disable-goal-bundle`) when it is
- * installed: that keeps the profile patch clean and toggles from the Plugins
- * UI. This script remains the choice for custom profiles and for inspecting
- * exactly what the bundle generates.
+ * Prefer a bundle: the main `@yankeguo/dsh-infini-goal-bundle` embeds the same
+ * layer by default, and the standalone `@yankeguo/dsh-disable-goal-bundle`
+ * carries it for profiles without the suite. A bundle keeps the profile patch
+ * clean and toggles from the Plugins UI. This script remains the choice for
+ * custom profiles and for inspecting exactly what the bundles generate.
  *
  * Why not just disable the `goal` host row? The shipped Web surface keeps the
  * `goals` SERVICE on the host plane and mounts `command-goal` / `tool-goal`

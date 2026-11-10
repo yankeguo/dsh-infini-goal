@@ -1,3 +1,7 @@
+# Main bundle rows for the infini-goal suite. Applied first; the generated
+# ./cordis.disable-goal.patch.yml is applied right after it (see
+# dsh.bundle.patch in package.json) and switches the built-in dsh-goal mode off
+# by default. Delete a row here only together with the package it names.
 - insert:
     - id: infini-goal
       name: '@yankeguo/dsh-infini-goal'

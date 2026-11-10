@@ -101,6 +101,9 @@ importers:
       '@yankeguo/dsh-command-infini-goal':
         specifier: workspace:*
         version: link:../command
+      '@yankeguo/dsh-disable-goal-bundle':
+        specifier: workspace:*
+        version: link:../disable-goal-bundle
       '@yankeguo/dsh-infini-goal':
         specifier: workspace:*
         version: link:../infini-goal

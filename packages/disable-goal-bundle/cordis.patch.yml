@@ -4,6 +4,12 @@
 # dsh-goal mode as an ordinary bundle layer. Enable it to turn the built-in
 # mode off; disable it to restore it.
 #
+# The main bundle (@yankeguo/dsh-infini-goal-bundle) embeds the same rows by
+# default, so this standalone bundle is only for profiles that want the
+# built-in goal off WITHOUT the infini-goal suite. Enabling both bundles is
+# redundant (the shared row ids collapse to one mounted row) and makes these
+# filter rows unaddressable in the Plugins page; prefer one bundle.
+#
 # The shipped Web composition keeps the `goal` SERVICE on the host plane but
 # mounts command-goal/tool-goal per agent preset. A profile patch cannot
 # reach those child rows (they are preset config data, not Loader rows), and

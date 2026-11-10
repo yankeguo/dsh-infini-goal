@@ -21,6 +21,7 @@ tools/e2e/
 ├── probe-imports.sh              # risk probe: absolute-path plugin importing @deepseek-ai/* (baseline + workaround)
 ├── probe-tools.sh / .mjs         # model tool-path proof: scripted create_infini_goal call, tool row, goal
 ├── probe-install.sh / .mjs       # installed-profile proof: scripts/install-profile.mjs path, commands, driver
+├── probe-bundles.sh / .mjs       # bundle-packaging regression: main-only disable layer, legacy companion tolerance
 ├── smoke.sh                      # self-test: boot, boot graph, host+client fixture plugin, text turn, tool-call turn
 ├── suite.sh                      # REAL SUITE E2E: build repo, dev-patch, boot, control plugin, scenarios
 ├── suite-drive.mjs               # pacing / quiet-window / pause scenario driver
@@ -57,7 +58,7 @@ All scratch state goes to **`/tmp/dsh-e2e/`** by default:
 | `/tmp/dsh-e2e/state` | `web.pid`, `llm.pid`, `web.url` (tokenized), `cookie`, `llm.port` |
 | `/tmp/dsh-e2e/workspace` | Session working directory |
 | `/tmp/dsh-e2e/documents` | isolated first-use Documents directory (default workspace) |
-| `/tmp/dsh-e2e/smoke`, `/suite` | per-run artifacts/reports |
+| `/tmp/dsh-e2e/smoke`, `/suite`, `/bundles` | per-run artifacts/reports |
 
 ---
 
@@ -88,7 +89,12 @@ tools/e2e/probe-tools.sh
 tools/e2e/probe-install.sh
 # -> PROBE INSTALL PASS
 
-# 6. keep an instance running for manual/browser checks
+# 6. bundle-packaging regression (main bundle alone disables the built-in goal;
+#    a legacy profile with the companion bundle still selected keeps working)
+tools/e2e/probe-bundles.sh
+# -> PROBE BUNDLES PASS (61 checks)
+
+# 7. keep an instance running for manual/browser checks
 DSH_E2E_KEEP_RUNNING=1 tools/e2e/smoke.sh    # or suite.sh --only scenario1
 # open the printed tokenized URL in a fresh browser tab
 tools/e2e/stop-web.sh
@@ -475,9 +481,9 @@ representation), then inspect the isolated home and restart with
 
 ---
 
-## Companion proofs: browser UI, command path, tool path, installed mode
+## Companion proofs: browser UI, command path, tool path, installed mode, bundle packaging
 
-The suite run above proves composition + pacing over the API. These four
+The suite run above proves composition + pacing over the API. These five
 companion checks prove the user-facing layers:
 
 | # | Check | Script / method | Proves |
@@ -485,7 +491,8 @@ companion checks prove the user-facing layers:
 | 1 | Browser UI bar + pause interaction | Browser MCP (manual, documented below) | client slot registration, projection stream, command dispatch loop |
 | 2 | Real `/infini-goal` host command | browser composer + `commands/execute` over `/api` | command row, grammar, rendered status text |
 | 3 | Model tool path | `probe-tools.sh` | tool row, scripted `create_infini_goal` call, host authority check, domain mutation |
-| 4 | Installed-profile mode | `probe-install.sh` | `scripts/install-profile.mjs` user path, bundle composition, no load errors |
+| 4 | Installed-profile mode | `probe-install.sh` | `scripts/install-profile.mjs` user path, bundle composition, no load errors, native goal off by default |
+| 5 | Bundle packaging + upgrade path | `probe-bundles.sh` | main bundle embeds the disable layer, legacy companion deselection, tolerated duplicate ids, absence of native goal |
 
 ---
 
@@ -698,7 +705,170 @@ needed for this path: `install-profile.mjs` symlinks each package below the
 profile's own `node_modules`, so DSH already treats them as linked roots and the
 bundles' `@deepseek-ai/*` imports resolve to the installation's single copies.
 
+The main bundle now also embeds the built-in-goal disable layer, so this proof
+intentionally covers the **new default**: the native `dsh-goal` mode is off.
+`probe-install.sh` passes the new absence assertions to the probes:
+
+```sh
+node probe-web.mjs --assert-client-entry @yankeguo/dsh-client-ui-infini-goal \
+  --assert-client-bundle @yankeguo/dsh-client-ui-infini-goal \
+  --assert-no-client-entry @deepseek-ai/dsh-client-ui-goal
+node probe-install.mjs --assert-no-command goal \
+  --assert-no-tool get_goal --assert-no-tool create_goal --assert-no-tool update_goal
+```
+
+Re-run on 2026-11-10 (isolated `/tmp/dsh-e2e-install`, ports 34200/34201):
+`PROBE INSTALL PASS` with `PASS client entry absent
+@deepseek-ai/dsh-client-ui-goal`, `PASS commands/list does not advertise /goal`
+(6 commands), `PASS model tools do not include get_goal` / `create_goal` /
+`update_goal`, and `PASS native dsh-goal mode is off by default (no /goal
+command, no goal tools)`. The frozen-tree block above shows 7 commands because
+it predates the disable layer; the current installed default advertises 6.
+
 Artifacts: `/tmp/dsh-e2e-install/smoke/{install-profile.log,probe-install-web.log,probe-install.log}`.
+
+---
+
+## 5. Bundle-packaging regression (`probe-bundles.sh`)
+
+The bundle-packaging change: `@yankeguo/dsh-infini-goal-bundle` now declares
+`dsh.bundle.patch` as an **ordered two-file list**
+
+```json
+"dsh": { "bundle": { "patch": ["./cordis.patch.yml", "./cordis.disable-goal.patch.yml"] } }
+```
+
+whose generated second file carries exactly the same rows (and the same row
+ids) as the legacy companion bundle `@yankeguo/dsh-disable-goal-bundle`.
+Installing the main bundle **alone** therefore disables DSH's built-in
+`dsh-goal` mode by default: `goal-round-driver`, `ui-goal`,
+`preset-standard`, `preset-ptc`, `preset-cordis` are switched off and one
+generated `preset-*-filter` row per shipped preset re-mounts that preset with
+`command-goal`/`tool-goal` removed. No second bundle selection is needed.
+
+Run it (build artifacts are required first):
+
+```sh
+pnpm build
+tools/e2e/probe-bundles.sh
+# -> PROBE BUNDLES PASS (61 checks)
+```
+
+It always starts from a fresh isolated `DSH_HOME` and runs two phases.
+
+### Phase A — main bundle only (the new default)
+
+1. `tools/e2e/bootstrap.sh --fresh`;
+2. `node scripts/install-profile.mjs --dsh-home /tmp/dsh-e2e/home --profile e2e`
+   (the user-facing install path; no `--patch` overlays);
+3. **migration**: manually select `@yankeguo/dsh-disable-goal-bundle`
+   immediately *before* the main bundle (the shape of a profile installed
+   before this change), then rerun `install-profile.mjs`. It must exit 0 and
+   print `deselected @yankeguo/dsh-disable-goal-bundle: its layer is now
+   embedded by the main bundle (package kept installed)`; the profile now
+   selects only the main bundle and `--dump-config` has no duplicate ids;
+4. `--disable-builtin-goal` is accepted as a deprecated no-op and prints
+   `note: --disable-builtin-goal is deprecated and no longer needed; ...`;
+5. installed main bundle: ordered two-file `dsh.bundle.patch`, generated
+   `cordis.disable-goal.patch.yml` shipped, companion package still installed
+   in the profile `node_modules` (the filter rows import its `preset-filter`
+   runtime module), and the main manifest declares it as a dependency;
+6. boot-free `dsh e2e --dump-config` (204 top-level rows, 204 unique ids):
+   `infini-goal`, `infini-goal-driver`, `infini-goal-tool`,
+   `infini-goal-command`, `infini-goal-ui` and `preset-standard-filter`,
+   `preset-ptc-filter`, `preset-cordis-filter` appear exactly once;
+   `goal-round-driver`, `ui-goal`, `preset-standard`, `preset-ptc`,
+   `preset-cordis` all carry `disabled: true`;
+7. boot the isolated Web instance: `web.log` has no plugin load/startup/
+   duplicate-preset errors; `window.__DSH_BOOT__` contains
+   `@yankeguo/dsh-client-ui-infini-goal` and NOT
+   `@deepseek-ai/dsh-client-ui-goal`; `probe-install.mjs` passes;
+   `commands/list` advertises `/infini-goal` (6 commands) and not `/goal`;
+   the model tool list has `get_infini_goal`/`create_infini_goal`/
+   `update_infini_goal` and not `get_goal`/`create_goal`/`update_goal`.
+
+### Phase B — main bundle + legacy companion both enabled (upgrade path)
+
+This simulates a profile installed before the change whose
+`dsh.profile.bundles` still lists the companion directly before the main
+bundle (the real user's `~/.dsh/profiles/desktop` shape):
+
+1. put the companion back immediately before the main bundle;
+2. `dsh e2e --dump-config` (207 top-level rows, exit 0, empty stderr): exactly
+   **2 rows** for each of `preset-standard-filter` / `preset-ptc-filter` /
+   `preset-cordis-filter` — the only duplicate ids in the composition — and
+   the five disable overrides still present;
+3. boot: same runtime assertions as Phase A (`/infini-goal` works, no native
+   goal UI/command/tools), and `web.log` additionally has no
+   `plugin tree failed` / `StartupError` / `inactive entry` /
+   `Duplicate agent preset` / `waiting for goals` lines.
+
+### Why the duplicate ids are safe (and must stay identical)
+
+`--dump-config` does **not** dedupe insert rows: the include layer appends
+every inserted entry (`vendor/include/src/patch.ts`), so a both-bundles
+composition shows each filter id twice. The Loader then keys its entry group
+by id (`vendor/loader/src/config/group.ts` `update()`: one map entry per id,
+last row wins), so the preset filter **mounts exactly once** — no error, no
+warning, identical runtime behavior. Distinct ids would instead mount two
+agent presets with the same preset id and log
+`Duplicate agent preset: <id>` (`packages/preset/agent-preset-registry`), so
+the two generated patches deliberately keep the same ids.
+
+Documented caveat (not a test failure): with both bundles enabled, the three
+composed duplicate filter rows become **`unaddressable`** in the Plugins page
+(per-row switch locked); everything else stays addressable and runtime behavior
+is identical to Phase A.
+
+### Verified run (2026-11-10, `/tmp/dsh-e2e`, ports 34000/34100)
+
+```
+PROBE BUNDLES PASS (61 checks)
+
+Phase A:
+PASS A3: install-profile.mjs reports 'deselected @yankeguo/dsh-disable-goal-bundle'
+PASS A4: --disable-builtin-goal prints a deprecation notice
+PASS A6: --dump-config exits 0
+PASS A6: --dump-config wrote the composed config (204 top-level rows)
+PASS A6: --dump-config wrote nothing to stderr
+PASS dump-config top-level row ids are unique — ids=204
+PASS dump-config composes 1 row for infini-goal / infini-goal-driver /
+     infini-goal-tool / infini-goal-command / infini-goal-ui
+PASS dump-config composes 1 row for preset-standard-filter / preset-ptc-filter /
+     preset-cordis-filter
+PASS dump-config disables goal-round-driver / ui-goal / preset-standard /
+     preset-ptc / preset-cordis
+PASS A7: web.log has no plugin load/startup/duplicate-preset errors
+PASS A7: boot graph has the infini-goal client row and no built-in goal client row
+PASS A7: installed-composition probe passes; /goal command and built-in goal
+     tools are absent
+
+Phase B:
+PASS B2: --dump-config exits 0
+PASS B2: --dump-config wrote the composed config (207 top-level rows)
+PASS dump-config composes 2 rows for preset-standard-filter — rows=2
+PASS dump-config composes 2 rows for preset-ptc-filter — rows=2
+PASS dump-config composes 2 rows for preset-cordis-filter — rows=2
+PASS duplicate ids are limited to the three preset filter rows
+PASS dump-config disables goal-round-driver / ui-goal / preset-standard /
+     preset-ptc / preset-cordis
+PASS Phase B: isolated Web instance booted
+PASS Phase B: web.log has no plugin load/startup/duplicate-preset errors
+PASS Phase B: boot graph has the infini-goal client row and no built-in goal
+     client row
+PASS Phase B: installed-composition probe passes; /goal command and built-in
+     goal tools are absent
+```
+
+`web.log` grep result for both phases: `0` matches of
+`plugin tree failed|StartupError|Duplicate agent preset|waiting for goals|agent-preset/invalid|inactive entry|failed to (load|import|start) plugin`.
+
+Artifacts per run: `/tmp/dsh-e2e/bundles/` — one log per step
+(`phase-{a,b}-install.log`, `phase-a-migration-*.log`,
+`phase-a-deprecated-flag.log`, `phase-{a,b}-dump-config.yml` + `.err`,
+`phase-{a,b}-config.log`, `phase-{a,b}-probe-web.log`,
+`phase-{a,b}-probe-install.log`, `phase-{a,b}-start-web.log`, and
+`phase-{a,b}-web.log`, the host log copy of each phase).
 
 ---
 
@@ -733,11 +903,13 @@ On failure, everything this script spawned is stopped automatically.
 SIGTERM (`then SIGKILL` after 15 s) only the PIDs in `state/{web,llm}.pid`,
 removes ephemeral state. Logs and the isolated home are kept for inspection.
 
-### `probe-web.mjs --state-dir <dir> [--assert-client-entry <pkg>] [--assert-client-bundle <pkg>] [--assert-host-route <path>] [--print-entries] [--json]`
+### `probe-web.mjs --state-dir <dir> [--assert-client-entry <pkg>] [--assert-client-bundle <pkg>] [--assert-no-client-entry <pkg>] [--assert-host-route <path>] [--print-entries] [--json]`
 
 Logs in, reads the served index, parses `window.__DSH_BOOT__`, then asserts:
-entry presence, served bundle (`HTTP 200` + `__ModuleLoader__.load` + package
-name), and host route `GET` 200. Exit 1 on any failure.
+entry presence, entry absence (`--assert-no-client-entry`, used to prove the
+built-in goal client row is not composed), served bundle (`HTTP 200` +
+`__ModuleLoader__.load` + package name), and host route `GET` 200. Exit 1 on
+any failure.
 
 ### `run-session.mjs --prompt <text> [--prompt …] [--session-id <id>] [--cwd <dir>] [--expect <substr>] [--expect-assistant <substr>] [--events-out <file>] [--json]`
 
@@ -773,9 +945,30 @@ or `pnpm build && node scripts/dev-patch.mjs`).
 
 Installed-profile proof (section 4): fresh isolated home, then the real
 `scripts/install-profile.mjs` path, then boots without the dev patch and asserts
-no load errors, the boot-graph client row, `commands/list`/`commands/execute`
-for `/infini-goal`, an automatic driver round, the three advertised model tools,
-and the shared goal view through the control plugin.
+no load errors, the boot-graph client row (and the absence of the built-in goal
+client row), `commands/list`/`commands/execute` for `/infini-goal` (and the
+absence of `/goal`), an automatic driver round, the three advertised infini-goal
+model tools (and the absence of `get_goal`/`create_goal`/`update_goal`), and the
+shared goal view through the control plugin. The optional repeatable
+`--assert-no-command <name>` / `--assert-no-tool <name>` flags implement the
+absence checks; omitting them keeps the original behavior.
+
+### `probe-bundles.sh` / `probe-bundles.mjs`
+
+Bundle-packaging regression (section 5): two phases against a fresh isolated
+home. Phase A installs the main bundle only — including the migration path where
+a profile that still selects the legacy companion is deselected by
+`install-profile.mjs` — and asserts the boot-free composition (all infini-goal
+rows and the three preset filters mounted once, the five built-in-goal rows
+disabled, every top-level id unique) plus the runtime absence of the native
+goal UI/command/tools. Phase B re-selects the legacy companion immediately
+before the main bundle and asserts the tolerated duplicate ids: exactly two
+rows for each `preset-*-filter` id in `--dump-config`, same runtime behavior,
+and a clean `web.log`. `probe-bundles.mjs` is the file-only assertion helper
+(profile manifest, `--dump-config` parsing, selecting the legacy companion);
+it takes no YAML dependency. Artifacts:
+`${DSH_E2E_ROOT}/bundles/`. Always stops the isolated instance (unless
+`DSH_E2E_KEEP_RUNNING=1`, which leaves the phase-B instance running).
 
 ### `smoke.sh` / `suite.sh`
 
