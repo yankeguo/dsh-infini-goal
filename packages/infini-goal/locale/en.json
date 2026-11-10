@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Infini Goal",
+    "description": "Event-sourced endless goal state for DeepSeek Harness: no round cap, a minimum trigger interval, and quiet time windows."
+  }
+}

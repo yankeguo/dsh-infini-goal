@@ -1,16 +1,18 @@
 {
   "name": "@yankeguo/dsh-infini-goal",
   "version": "0.2.0",
-  "description": "Event-sourced endless goal state (无轮次上限 + 最小触发间隔 + 静默时段) for the DeepSeek Harness.",
+  "description": "Event-sourced endless goal state for DeepSeek Harness: no round cap, a minimum trigger interval, and quiet time windows.",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "files": [
-    "lib"
+    "lib",
+    "locale/*.json"
   ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "~4.1.0",

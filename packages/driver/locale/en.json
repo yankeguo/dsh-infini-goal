@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Infini Goal Driver",
+    "description": "Automatic continuation driver for infini-goal: paced by a minimum trigger interval and suppressed inside quiet time windows."
+  }
+}

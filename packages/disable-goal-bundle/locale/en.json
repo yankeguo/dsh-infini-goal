@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Disable Built-in Goal",
+    "description": "Turns the built-in dsh-goal mode (automatic rounds, GoalBar, /goal command, and goal tools) off as an ordinary toggleable bundle layer."
+  }
+}

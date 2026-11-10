@@ -17,13 +17,15 @@
   "exports": {
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./cordis.disable-goal.patch.yml": "./cordis.disable-goal.patch.yml",
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "files": [
     "cordis.patch.yml",
     "cordis.disable-goal.patch.yml",
     "icon.svg",
-    "README.md"
+    "README.md",
+    "locale/*.json"
   ],
   "dependencies": {
     "@yankeguo/dsh-disable-goal-bundle": "workspace:*",

@@ -415,7 +415,7 @@ row id，DSH 能容忍重复行、每类 filter 只挂载一次（后插入者�
 
 ```sh
 pnpm typecheck     # 全仓 TS 检查
-pnpm test          # 单测（23 个文件 / 381 个用例），含生成 bundle 的组合一致性检查
+pnpm test          # 单测，含生成 bundle 的组合一致性与插件展示元数据检查
 pnpm build         # esbuild 产物（9 个 lib/*.js）
 pnpm dev:patch     # 生成 .tmp/cordis.patch.yml（绝对路径插入，免安装调试）
 node scripts/build-disable-goal-bundle.mjs --check   # 生成的 bundle patch 与 manifest 是否最新
@@ -430,6 +430,17 @@ tools/e2e/suite.sh --fresh      # 本插件套件的端到端场景（最小间�
 tools/e2e/probe-install.sh      # 安装态验证：官方 goal 默认关闭、/infini-goal 与驱动器可用
 tools/e2e/probe-bundles.sh      # bundle 打包验证：主 bundle 单独安装、旧伴生 bundle 迁移、重复 id 容忍
 ```
+
+### 插件展示元数据
+
+每个发布的包都在 `locale/en.json` 与 `locale/zh.json` 中提供 DSH 插件展示文本
+（`{"meta":{"title":"…","description":"…"}}`），并通过 `package.json` 的 `files` 里的
+`"locale/*.json"` 与 `exports` 里的 `"./locale/*.json": "./locale/*.json"` 接线。DSH 不执行插件
+代码即可读取这些文件，因此 Plugins 页面与插件市场展示友好名称和一句话描述，而不是 npm 包名；
+locale 缺字段时 DSH 回退到 `package.json` 的 `description`（标题最终回退到包名）。
+`packages/bundle/tests/plugin-metadata.spec.ts`（由 `pnpm test` 执行）校验中英双语齐全、标题/描述
+非空、manifest 接线、`description` 与英文 locale 同步，并限制文案不出现营销最高级词。新增包时必须
+同时补两个 locale 文件、`files`/`exports` 接线，并把包加进该测试的期望表。
 
 设计说明与数据结构见 [`docs/DESIGN.md`](docs/DESIGN.md)，E2E 工具与已知限制见
 [`tools/e2e/README.md`](tools/e2e/README.md)。

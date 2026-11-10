@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "无限目标",
+    "description": "DeepSeek Harness 的无限目标模式：无轮次上限、最小触发间隔，静默时段内不自动触发；安装后默认关闭系统自带的 dsh-goal 模式。"
+  }
+}

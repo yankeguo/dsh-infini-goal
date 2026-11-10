@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "关闭系统自带目标",
+    "description": "以普通可开关 bundle 层关闭系统自带的 dsh-goal 模式（自动轮次、GoalBar、/goal 命令与 goal 工具）。"
+  }
+}

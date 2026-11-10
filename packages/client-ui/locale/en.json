@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Infini Goal Bar",
-    "description": "Shows the endless goal's phase, rounds, trigger pacing, and quiet-window state above the composer."
+    "title": "Infini Goal Status Bar",
+    "description": "Infini Goal status bar above the composer: phase, rounds, trigger pacing, quiet-window state, and lifecycle controls."
   }
 }

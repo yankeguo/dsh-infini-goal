@@ -460,7 +460,7 @@ filter rows individually. `pnpm install:profile` deselects the companion automat
 
 ```sh
 pnpm typecheck     # TypeScript check across the monorepo
-pnpm test          # unit tests (23 files / 381 cases), including the generated-bundle composition check
+pnpm test          # unit tests, including the generated-bundle composition and plugin-metadata checks
 pnpm build         # esbuild outputs (9 lib/*.js files)
 pnpm dev:patch     # generate .tmp/cordis.patch.yml (absolute-path insertion; debug without installing)
 node scripts/build-disable-goal-bundle.mjs --check   # generated bundle patches + manifests are current
@@ -475,6 +475,19 @@ tools/e2e/suite.sh --fresh      # end-to-end scenarios for this suite (minimum i
 tools/e2e/probe-install.sh      # installed-profile proof: native goal off by default, /infini-goal works
 tools/e2e/probe-bundles.sh      # bundle packaging: main-only install, legacy-companion migration, duplicate-id tolerance
 ```
+
+### Plugin display metadata
+
+Every package ships DSH plugin display text in `locale/en.json` and `locale/zh.json`
+(`{"meta":{"title":"…","description":"…"}}`), wired through `"locale/*.json"` in `files` and
+`"./locale/*.json": "./locale/*.json"` in `exports`. DSH reads these files without evaluating plugin
+code, so the Plugins page and the plugin market show a friendly title and one-line description
+instead of the npm package name. If a locale omits a field, DSH falls back to the package
+`description` (then the package name for the title). `packages/bundle/tests/plugin-metadata.spec.ts`
+(picked up by `pnpm test`) enforces en/zh parity, non-empty titles/descriptions, the manifest wiring,
+the `description` ↔ English-locale sync rule, and keeps list copy free of marketing superlatives.
+When adding a package, add both locale files, the `files`/`exports` entry, and the package to that
+spec's expected table.
 
 Design notes and data structures are in [`docs/DESIGN.md`](docs/DESIGN.md); E2E tooling and known
 limitations are in [`tools/e2e/README.md`](tools/e2e/README.md).

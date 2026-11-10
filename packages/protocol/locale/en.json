@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Infini Goal Protocol",
+    "description": "Pure shared protocol of the infini-goal plugin suite: durable goal types, schedule math, duration and quiet-window parsing."
+  }
+}

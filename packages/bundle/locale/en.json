@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Infini Goal",
+    "description": "Endless goal mode for DeepSeek Harness: no round cap, a minimum trigger interval, and quiet time windows that suppress automatic rounds; installing it also switches the built-in dsh-goal mode off by default."
+  }
+}

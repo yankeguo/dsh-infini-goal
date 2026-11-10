@@ -1,7 +1,7 @@
 {
   "name": "@yankeguo/dsh-disable-goal-bundle",
   "version": "0.2.0",
-  "description": "Companion bundle for @yankeguo/dsh-infini-goal: disables the built-in dsh-goal mode (automatic rounds, GoalBar, /goal command and goal tools) as an ordinary toggleable bundle layer.",
+  "description": "Turns the built-in dsh-goal mode (automatic rounds, GoalBar, /goal command, and goal tools) off as an ordinary toggleable bundle layer.",
   "license": "MIT",
   "type": "module",
   "icon": "./icon.svg",
@@ -15,13 +15,15 @@
     ".": "./lib/preset-filter.js",
     "./preset-filter": "./lib/preset-filter.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
     "cordis.patch.yml",
     "icon.svg",
-    "README.md"
+    "README.md",
+    "locale/*.json"
   ],
   "engines": {
     "dsh": ">=0.2.2-rc.1 <0.3.0"
