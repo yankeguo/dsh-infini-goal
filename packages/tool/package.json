@@ -1,6 +1,6 @@
 {
   "name": "@yankeguo/dsh-tool-infini-goal",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Model-facing get/create/update tools for the endless infini-goal with pacing and quiet windows.",
   "license": "MIT",
   "type": "module",

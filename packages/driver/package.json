@@ -1,6 +1,6 @@
 {
   "name": "@yankeguo/dsh-infini-goal-driver",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Automatic continuation driver for infini-goal: paced by a minimum trigger interval and suppressed inside quiet time windows.",
   "license": "MIT",
   "type": "module",

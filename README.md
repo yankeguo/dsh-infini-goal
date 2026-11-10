@@ -151,7 +151,7 @@ Uninstall: `pnpm uninstall:profile`.
 
 ```sh
 # Upgrade to a specific version (after publishing to npm)
-dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle@0.2.0
+dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle@0.2.1
 
 # Uninstall (DSH clears the selection of removed bundles the next time it loads the profile)
 dsh plugin --profile desktop remove @yankeguo/dsh-infini-goal-bundle

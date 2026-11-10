@@ -1,6 +1,6 @@
 {
   "name": "dsh-infini-goal",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "Endless goal continuation plugin suite for DeepSeek Harness: no round cap, a configurable minimum trigger interval, and quiet time windows that suppress automatic rounds.",

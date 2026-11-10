@@ -139,7 +139,7 @@ DSH 的 profile HMR 会实时加载 Host 插件；浏览器侧刷新页面后出
 
 ```sh
 # 升级到指定版本（发布到 npm 后）
-dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle@0.2.0
+dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle@0.2.1
 
 # 卸载（DSH 下次加载 profile 时会清理已移除 bundle 的选择）
 dsh plugin --profile desktop remove @yankeguo/dsh-infini-goal-bundle

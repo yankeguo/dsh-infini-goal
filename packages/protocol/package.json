@@ -1,6 +1,6 @@
 {
   "name": "@yankeguo/dsh-infini-goal-protocol",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Pure shared protocol of the infini-goal plugin suite: durable goal types, schedule math, duration and quiet-window parsing.",
   "license": "MIT",
   "type": "module",

@@ -1,6 +1,6 @@
 {
   "name": "@yankeguo/dsh-disable-goal-bundle",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Turns the built-in dsh-goal mode (automatic rounds, GoalBar, /goal command, and goal tools) off as an ordinary toggleable bundle layer.",
   "license": "MIT",
   "type": "module",
