@@ -1,6 +1,6 @@
 {
   "name": "@yankeguo/dsh-disable-goal-bundle",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Companion bundle for @yankeguo/dsh-infini-goal: disables the built-in dsh-goal mode (automatic rounds, GoalBar, /goal command and goal tools) as an ordinary toggleable bundle layer.",
   "license": "MIT",
   "type": "module",
