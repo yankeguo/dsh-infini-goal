@@ -26,6 +26,9 @@ interface PluginPackage {
   name: string
 }
 
+/** The install-entry bundle; its Chinese title names the suite, not the core plugin. */
+const BUNDLE: PluginPackage = { dir: 'bundle', name: '@yankeguo/dsh-infini-goal-bundle' }
+
 /** Every package that must ship DSH plugin display metadata. */
 const PACKAGES: PluginPackage[] = [
   { dir: 'protocol', name: '@yankeguo/dsh-infini-goal-protocol' },
@@ -34,7 +37,7 @@ const PACKAGES: PluginPackage[] = [
   { dir: 'tool', name: '@yankeguo/dsh-tool-infini-goal' },
   { dir: 'command', name: '@yankeguo/dsh-command-infini-goal' },
   { dir: 'client-ui', name: '@yankeguo/dsh-client-ui-infini-goal' },
-  { dir: 'bundle', name: '@yankeguo/dsh-infini-goal-bundle' },
+  BUNDLE,
   { dir: 'disable-goal-bundle', name: '@yankeguo/dsh-disable-goal-bundle' },
 ]
 
@@ -225,4 +228,11 @@ describe('plugin metadata', () => {
       })
     })
   }
+
+  it('names the install-entry bundle as a suite in Chinese', () => {
+    // Bundles are the install entry: 「…套件」 keeps the bundle distinguishable
+    // from the core plugin 「无限目标」 in the Plugins list (matches the naming
+    // used by other DSH bundles such as 「DevLead 套件」).
+    expect(readLocaleMeta(BUNDLE, 'zh').title).toBe('无限目标套件')
+  })
 })
