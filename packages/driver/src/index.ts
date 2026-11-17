@@ -43,6 +43,31 @@ function fiberActive(ctx: Context): boolean {
   return (ctx.fiber.state as number) === FIBER_ACTIVE
 }
 
+/** The cross-version face of the optional `subagents` service's descendant wait. */
+interface SubagentWorkWait {
+  /** DSH 0.2.2-rc.1: wait for the direct children of one agent. */
+  waitForChildren?: (agent: Agent) => Promise<boolean>
+  /** DSH 0.2.2-rc.2+: join the work of the whole subagent tree rooted at one agent. */
+  waitForTreeWork?: (agent: Agent) => Promise<boolean>
+}
+
+/**
+ * Wait for the in-process subagent work that a new round would only wait for.
+ *
+ * DSH 0.2.2-rc.1 exposed `SubagentsService.waitForChildren(parent)`; DSH
+ * 0.2.2-rc.2 renamed that wait to `waitForTreeWork(root)` and removed the old
+ * method. Both settle when the joined work settles; the boolean is advisory and
+ * the caller re-checks its own readiness afterwards.
+ * @param subagents - the optional `subagents` service.
+ * @param agent - the exact live agent whose descendants must settle first.
+ * @returns whether the service joined any work.
+ */
+function waitForSubagentWork(subagents: SubagentWorkWait, agent: Agent): Promise<boolean> {
+  if (typeof subagents.waitForChildren === 'function') return subagents.waitForChildren(agent)
+  if (typeof subagents.waitForTreeWork === 'function') return subagents.waitForTreeWork(agent)
+  return Promise.resolve(false)
+}
+
 /** Plugin configuration. */
 export interface Config {
   /**
@@ -436,7 +461,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     // A round started while descendants progress would only wait for them.
     const subagents = ctx.get('subagents')
     if (subagents !== undefined) {
-      await Promise.race([subagents.waitForChildren(agent), unloading.promise])
+      await Promise.race([waitForSubagentWork(subagents as unknown as SubagentWorkWait, agent), unloading.promise])
       if (!readyToDrive(state)) {
         armRetry(state)
         return

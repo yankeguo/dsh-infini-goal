@@ -170,13 +170,32 @@ export function openTurnHasInfiniGoalRound(
 }
 
 /**
+ * Whether one exact live agent is a runtime root (not a subagent).
+ *
+ * DSH 0.2.2-rc.1 exposed `AgentRegistry.roots()` (runtime ownership). DSH
+ * 0.2.2-rc.2 removed it, and the official `tool-goal` authority now classifies
+ * the caller by the durable subagent marker on the Session header instead.
+ * Prefer `roots()` while it exists so rc.1 keeps its exact runtime-ownership
+ * semantics, and fall back to the header check otherwise.
+ * @param ctx - Context carrying the live agent registry.
+ * @param agent - the calling agent.
+ * @returns true only for a live top-level agent.
+ */
+export function isRuntimeRoot(ctx: Context, agent: Agent): boolean {
+  const registry = ctx.agents as unknown as { roots?: () => Agent[] }
+  if (typeof registry.roots === 'function') return registry.roots().includes(agent)
+  if (ctx.agents.get(agent.id) !== agent) return false
+  return agent.session.header.origin !== 'subagent'
+}
+
+/**
  * Whether host-attested human input appears in the current root-agent turn.
  * @param ctx - Context carrying the live agent graph.
  * @param execution - authenticated current tool execution.
  * @returns true when the agent is a runtime root with direct human input this turn.
  */
 function hasDirectHumanInput(ctx: Context, execution: InfiniGoalToolExecution): boolean {
-  if (!ctx.agents.roots().includes(execution.agent)) return false
+  if (!isRuntimeRoot(ctx, execution.agent)) return false
   return openTurnHasDirectHumanInput(execution)
 }
 
