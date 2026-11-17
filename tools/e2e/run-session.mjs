@@ -9,7 +9,7 @@
  *     --expect-assistant "MOCK E2E first turn" \
  *     --expect "e2e-tool-ok"
  *
- * How it works (verified against DSH 0.2.2-rc.1):
+ * How it works (verified against DSH 0.2.2-rc.1 and re-checked on 0.2.2-rc.3):
  *   1. POST /api/session/create   {request:{cwd}}         -> {sessionId}
  *   2. POST /api/session/state    {request:{sessionId}}   -> {cursor,...}
  *   3. POST /api/session/prompt   {request:{requestId,sessionId,mode,content}}

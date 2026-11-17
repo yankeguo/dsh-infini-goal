@@ -1,9 +1,9 @@
 # Isolated E2E harness for the DeepSeek Harness plugin suite
 
 Reproducible, isolated end-to-end verification of this repo's DSH plugin suite
-against the **installed** DeepSeek Harness **0.2.2-rc.1** desktop runtime, with a
-deterministic mock LLM (no real API tokens) and no interference with the user's
-live Harness app or `~/.dsh` home.
+against the **installed** DeepSeek Harness desktop runtime — verified on
+**0.2.2-rc.1** and **0.2.2-rc.3** — with a deterministic mock LLM (no real API
+tokens) and no interference with the user's live Harness app or `~/.dsh` home.
 
 Everything lives under `tools/e2e/`. Every process the harness starts is spawned
 by these scripts and killed by PID; the live desktop app, its profile and its
@@ -42,7 +42,7 @@ tools/e2e/
 
 | Requirement | Notes |
 |---|---|
-| DeepSeek Harness **0.2.2-rc.1** desktop app installed | harness uses the packaged launcher `/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh` (override with `DSH_BIN`) |
+| DeepSeek Harness **0.2.2-rc.1** – **0.2.2-rc.3** desktop app installed | harness uses the packaged launcher `/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh` (override with `DSH_BIN`) |
 | Node.js **>= 24.9** on `PATH` | matches the repo `engines.node` (esbuild `target: node24`, SDK scripts); override with `DSH_E2E_NODE` |
 | `pnpm` + repo `node_modules` | `pnpm install` once; `suite.sh`/`probe-tools.sh` need `pnpm build` |
 | free TCP ports **>= 34000** | `DSH_E2E_WEB_PORT` (34000) and `DSH_E2E_LLM_PORT` (34100) |
@@ -182,7 +182,27 @@ Ports below 34000 are refused outright.
 
 ---
 
-## Discovered facts (DSH 0.2.2-rc.1)
+## Discovered facts (DSH 0.2.2-rc.1, re-verified on 0.2.2-rc.3)
+
+### What moved in DSH 0.2.2-rc.3
+
+The whole harness was re-run against the installed 0.2.2-rc.3 desktop runtime
+(2026-11-17). The browser boot graph, Web API, mock-provider protocol, and
+session-log behavior below were unchanged. Only two host APIs used by the
+suite moved, and both have feature-detected shims in the plugin:
+
+- `ctx.agents.roots()` (rc.1) is gone. Classify a live top-level agent with
+  `ctx.agents.list()` + `session.header.origin !== 'subagent'` (or the
+  exact-live-agent check used by the official `dsh-tool-goal`). The control
+  fixture uses this fallback.
+- `ctx.subagents.waitForChildren(agent)` (rc.1) became
+  `waitForTreeWork(root)` in rc.2; the driver calls whichever exists.
+- The `ProjectionDefinition` schema types are now bound to `zod@4.6.6`; the
+  repo's SDK devDependencies and the core plugin's `zod` peer follow it.
+
+Evidence on rc.3: `suite.sh --fresh` (pacing / quiet window / pause),
+`probe-tools.sh` (scripted `create_infini_goal`), and `probe-install.sh`
+(real install path, commands, tools, automatic round) all PASS.
 
 ### CLI / profile / patches
 

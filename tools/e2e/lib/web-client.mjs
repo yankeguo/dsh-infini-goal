@@ -5,7 +5,7 @@
  * Used by the tools/e2e probes and scenario drivers. Only Node.js built-ins are
  * used (`fetch`, `node:fs`, `node:path`); no repo or DSH package is imported.
  *
- * What it implements (verified against DeepSeek Harness 0.2.2-rc.1):
+ * What it implements (verified against DeepSeek Harness 0.2.2-rc.1 and 0.2.2-rc.3):
  *   - `login(url)`: exchange the launch token printed in the readiness line
  *     (`GET /?token=...`) for the signed browser cookie. The exchange answers
  *     `303 See Other` with `Location: ./` and one `Set-Cookie:

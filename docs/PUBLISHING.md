@@ -426,7 +426,9 @@ node scripts/promote-release.mjs --version 0.2.1 --reject
   但两边的值必须一致（审批会校验暂存时携带的 dist-tag）。用户安装预发布版时需要显式指定版本
   （DSH 插件市场按版本安装，不受 dist-tag 影响）。
 - 暂存版本的 dist-tag 不可变；需要换 tag 时必须先 reject 再重新 stage。
-- `engines.dsh` 当前为 `>=0.2.2-rc.1 <0.3.0`，**8 个包都声明**；DSH 升级到 0.3 时需更新该范围并回归。
+- `engines.dsh` 当前为 `>=0.2.2-rc.1 <0.3.0`，**8 个包都声明**；已在 0.2.2-rc.1 与 0.2.2-rc.3 验证
+  （兼容层见 [DSH 兼容性](COMPATIBILITY.md)），宿主 peerDependencies 使用同一范围。DSH 升级到 0.3 时需更新该范围并回归。
+- `zod` 固定为 `4.6.6`（与 DSH 0.2.2-rc.3 内置副本一致；projection schema 的类型身份依赖它）。
 - 破坏性变更：遵循 semver；预发布版本请使用 `-rc.N` / `-alpha.N` 后缀。
 
 ## 常见问题

@@ -437,6 +437,18 @@ bundle 的 `package.json` 声明 `dsh.bundle.patch` 与 `dsh.bundle.listedByDefa
     `waiting for goals` 错误，运行时行为与 A 相同。
 - 截图见 `docs/screenshots/`。
 
+### 11.1 DSH 0.2.2-rc.3 兼容性回归（2026-11-17）
+
+- 单元 / 构建：`pnpm verify` 针对 **0.2.2-rc.3** SDK（devDependencies 已升级）全绿——
+  typecheck、**24 个测试文件 / 453 个用例**、9 个 `lib/*.js` 产物。
+- 隔离运行：安装版 DSH **0.2.2-rc.3**（build commit `6b729fed…`）+ 确定性 mock LLM：
+  `tools/e2e/suite.sh --fresh` → SUITE PASS（三场景）；`probe-tools.sh` → PROBE TOOLS PASS
+  （脚本化 `create_infini_goal` 工具调用，走 direct-human 授权）；`probe-install.sh` →
+  PROBE INSTALL PASS（真实安装路径、命令、工具、自动轮次）。
+- rc.2 / rc.3 移除了 `ctx.agents.roots()`、把 `waitForChildren()` 改名为
+  `waitForTreeWork()`，并让 projection schema 绑定 `zod@4.6.6`；兼容层与验证矩阵见
+  [DSH 兼容性](COMPATIBILITY.md)。
+
 ## 12. 实现记录与偏差
 
 - **依赖外部化**：host bundle 外部化 `@deepseek-ai/*`、`@yankeguo/*`、`node:*`，其余内联。
