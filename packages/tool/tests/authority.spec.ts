@@ -11,6 +11,7 @@ import {
   infiniGoalRoundSourceOf,
   isDirectHumanSource,
   isMatchingInfiniGoalRoundSource,
+  isRuntimeRoot,
   openTurnHasDirectHumanInput,
   openTurnHasInfiniGoalRound,
   requireDirectHuman,
@@ -75,6 +76,25 @@ function execution(events: readonly SessionEvent[], openTurnStartSeq = 0): Infin
 /** Minimal Context exposing only the root-agent registry read. */
 function fakeContext(roots: readonly Agent[]): Context {
   return { agents: { roots: () => [...roots] } } as unknown as Context
+}
+
+/** Build one live-agent fixture exposing identity and the durable Session header. */
+function headerAgent(origin?: 'subagent'): Agent {
+  return {
+    id: 'agent-1',
+    status: 'running',
+    session: { header: { origin } },
+  } as unknown as Agent
+}
+
+/** Minimal Context shaped like DSH 0.2.2-rc.2+, whose registry has no `roots()`. */
+function fakeRc3Context(live: Agent | undefined): Context {
+  return { agents: { get: (id: string) => id === live?.id ? live : undefined } } as unknown as Context
+}
+
+/** Build one authority cut for an explicit agent. */
+function executionFor(agent: Agent, events: readonly SessionEvent[], openTurnStartSeq = 0): InfiniGoalToolExecution {
+  return { agent, events, openTurnStartSeq: SessionSeq(openTurnStartSeq) }
 }
 
 describe('isDirectHumanSource', () => {
@@ -301,6 +321,42 @@ describe('requireDirectHuman on a subagent', () => {
       openTurnStartSeq: SessionSeq(0),
     }
     const error = rejectionOf(() => requireDirectHuman(fakeContext([]), human))
+    expect(error.code).toBe('INFINI_GOAL_TOOL_AUTHORITY_REQUIRED')
+  })
+})
+
+describe('isRuntimeRoot across DSH registry shapes', () => {
+  it('prefers the rc.1 roots() registry when present', () => {
+    const root = headerAgent()
+    const child = headerAgent('subagent')
+    expect(isRuntimeRoot(fakeContext([root]), root)).toBe(true)
+    expect(isRuntimeRoot(fakeContext([root]), child)).toBe(false)
+  })
+
+  it('classifies by the Session header when roots() is absent (DSH 0.2.2-rc.2+)', () => {
+    const root = headerAgent()
+    expect(isRuntimeRoot(fakeRc3Context(root), root)).toBe(true)
+    const child = headerAgent('subagent')
+    expect(isRuntimeRoot(fakeRc3Context(child), child)).toBe(false)
+  })
+
+  it('rejects an agent the registry no longer holds', () => {
+    expect(isRuntimeRoot(fakeRc3Context(undefined), headerAgent())).toBe(false)
+    expect(isRuntimeRoot(fakeRc3Context(headerAgent()), headerAgent())).toBe(false)
+  })
+})
+
+describe('completionAuthority across DSH registry shapes', () => {
+  it('grants direct-human authority on a rc.3-style root without roots()', () => {
+    const agent = headerAgent()
+    const exec = executionFor(agent, [turnStartEvent(0), userEvent(1, { kind: 'user' })])
+    expect(completionAuthority(fakeRc3Context(agent), exec, GOAL)).toEqual({ kind: 'direct-human' })
+  })
+
+  it('rejects human-looking input on a rc.3-style subagent', () => {
+    const agent = headerAgent('subagent')
+    const exec = executionFor(agent, [turnStartEvent(0), userEvent(1, { kind: 'user' })])
+    const error = rejectionOf(() => requireDirectHuman(fakeRc3Context(agent), exec))
     expect(error.code).toBe('INFINI_GOAL_TOOL_AUTHORITY_REQUIRED')
   })
 })

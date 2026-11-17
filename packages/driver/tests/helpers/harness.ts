@@ -308,19 +308,31 @@ export interface BootOptions {
   readonly subagents?: SubagentsStub
 }
 
-/** Fake `subagents` service with a controllable child wait. */
+/** Fake `subagents` service with a controllable descendant wait. */
 export interface SubagentsStub {
-  waitForChildren(agent: Agent): Promise<boolean>
+  /** DSH 0.2.2-rc.1 shape: wait for direct children. */
+  waitForChildren?: (agent: Agent) => Promise<boolean>
+  /** DSH 0.2.2-rc.2+ shape: join the whole subagent tree's work. */
+  waitForTreeWork?: (agent: Agent) => Promise<boolean>
   /** Resolve the pending wait. */
   readonly pending: Deferred<boolean>
 }
 
-/** Build a fake optional subagents service. */
+/** Build a fake optional subagents service exposing the rc.1 `waitForChildren` method. */
 export function subagentsStub(): SubagentsStub {
   const pending = deferred<boolean>()
   return {
     pending,
     waitForChildren: () => pending.promise,
+  }
+}
+
+/** Build a fake optional subagents service exposing only the rc.3 `waitForTreeWork` method. */
+export function treeWorkSubagentsStub(): SubagentsStub {
+  const pending = deferred<boolean>()
+  return {
+    pending,
+    waitForTreeWork: () => pending.promise,
   }
 }
 

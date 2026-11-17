@@ -58,13 +58,22 @@ function sendJson(res, status, value) {
   res.end(JSON.stringify(value))
 }
 
+/**
+ * Live top-level agents across DSH versions: 0.2.2-rc.1 exposes
+ * `AgentRegistry.roots()`; 0.2.2-rc.2+ removed it, so fall back to the durable
+ * subagent marker on the Session header.
+ */
+function rootAgents(ctx) {
+  if (typeof ctx.agents.roots === 'function') return ctx.agents.roots()
+  return ctx.agents.list().filter(agent => agent.session?.header?.origin !== 'subagent')
+}
+
 /** Resolve the live Agent named by a request, falling back to the first root. */
 function findAgent(ctx, sessionId) {
   if (typeof sessionId === 'string' && sessionId !== '') {
     return ctx.agents.get(sessionId)
   }
-  const roots = ctx.agents.roots()
-  return roots[0] ?? ctx.agents.list()[0]
+  return rootAgents(ctx)[0] ?? ctx.agents.list()[0]
 }
 
 /** Render one error as an HTTP payload. */
@@ -97,7 +106,7 @@ export function apply(ctx) {
               ok: true,
               hasInfiniGoals: true,
               agents: ctx.agents.list().map(agent => ({ id: agent.id })),
-              roots: ctx.agents.roots().map(agent => ({ id: agent.id })),
+              roots: rootAgents(ctx).map(agent => ({ id: agent.id })),
             })
             return
           }

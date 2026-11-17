@@ -82,7 +82,15 @@ interface PackageManifest {
   description?: unknown
   files?: unknown
   exports?: unknown
+  engines?: unknown
+  peerDependencies?: unknown
 }
+
+/** DSH compatibility range every published package declares today. */
+const DSH_RANGE = '>=0.2.2-rc.1 <0.3.0'
+
+/** The zod version DSH 0.2.2-rc.3 binds projection schema types to. */
+const ZOD_VERSION = '4.6.6'
 
 /**
  * Read one JSON file.
@@ -188,6 +196,25 @@ describe('plugin metadata', () => {
         const exportsMap = exportsField as Record<string, unknown>
         expect(exportsMap['./locale/*.json'], `${pkg.dir}/package.json#exports`).toBe('./locale/*.json')
         expect(exportsMap['./package.json'], `${pkg.dir}/package.json#exports`).toBe('./package.json')
+      })
+
+      it('declares the verified DSH compatibility range', () => {
+        const manifest = readManifest(pkg)
+        const engines = manifest.engines
+        expect(engines, `${pkg.dir}/package.json#engines must be an object`).toBeTypeOf('object')
+        expect((engines as Record<string, unknown>).dsh, `${pkg.dir}/package.json#engines.dsh`).toBe(DSH_RANGE)
+        const peers = manifest.peerDependencies
+        expect(peers, `${pkg.dir}/package.json#peerDependencies must be an object`).toBeTypeOf('object')
+        const peerMap = peers as Record<string, unknown>
+        for (const [name, range] of Object.entries(peerMap)) {
+          if (!name.startsWith('@deepseek-ai/dsh-')) continue
+          expect(range, `${pkg.dir}/package.json#peerDependencies["${name}"]`).toBe(DSH_RANGE)
+        }
+        // DSH 0.2.2-rc.3 types ProjectionDefinition.stateSchema with its own
+        // zod copy; one shared version keeps the schema type identity valid.
+        if ('zod' in peerMap) {
+          expect(peerMap.zod, `${pkg.dir}/package.json#peerDependencies.zod`).toBe(ZOD_VERSION)
+        }
       })
 
       it('keeps package.json description in sync with locale/en.json', () => {

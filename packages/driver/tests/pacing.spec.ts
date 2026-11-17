@@ -17,6 +17,7 @@ import {
   humanMessage,
   settle,
   subagentsStub,
+  treeWorkSubagentsStub,
 } from './helpers/harness.ts'
 
 /** Node saturates setTimeout delays above this value. */
@@ -106,6 +107,20 @@ describe('automatic round pacing', () => {
     expect(admittedRounds(harness)).toEqual([1])
     await advance(harness, 1)
     expect(admittedRounds(harness)).toEqual([1, 2])
+  })
+
+  it('waits through the rc.3 waitForTreeWork method before reserving a round', async () => {
+    fakeClock()
+    const stub = treeWorkSubagentsStub()
+    const harness = await boot({ subagents: stub as never })
+    createGoal(harness, { minIntervalMs: 60_000 })
+    await settle(harness)
+    // The driver is parked on the tree wait before reserving round one.
+    expect(admittedRounds(harness)).toEqual([])
+
+    stub.pending.resolve(true)
+    await settle(harness)
+    expect(admittedRounds(harness)).toEqual([1])
   })
 
   it('re-checks pacing after waiting for subagent descendants', async () => {
