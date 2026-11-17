@@ -25,7 +25,7 @@ range working.
 | DSH | Evidence | Result |
 | --- | --- | --- |
 | `0.2.2-rc.1` | v0.2.0 / v0.2.1 releases: `tools/e2e/suite.sh`, `probe-tools.sh`, `probe-install.sh`, `probe-bundles.sh` | pass |
-| `0.2.2-rc.3` (installed desktop app) | this change, 2026-11-17: `pnpm verify` (typecheck + 445 tests + build), `tools/e2e/suite.sh --fresh` (pacing, quiet window, pause), `probe-tools.sh` (scripted `create_infini_goal`), `probe-install.sh` (real `install-profile.mjs` path, commands, tools, automatic round) | pass |
+| `0.2.2-rc.3` (installed desktop app) | this change, 2026-11-17: `pnpm verify` (typecheck + 453 tests + build), `tools/e2e/suite.sh --fresh` (pacing, quiet window, pause), `probe-tools.sh` (scripted `create_infini_goal`), `probe-install.sh` (real `install-profile.mjs` path, commands, tools, automatic round), `probe-bundles.sh` (61-check bundle regression) | pass |
 
 The 0.2.2-rc.2 / rc.3 API changes were checked against the DSH build embedded
 in the installed desktop app (`0.2.2-rc.3`, build commit
