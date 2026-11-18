@@ -1,8 +1,9 @@
 # Isolated E2E harness for the DeepSeek Harness plugin suite
 
 Reproducible, isolated end-to-end verification of this repo's DSH plugin suite
-against the **installed** DeepSeek Harness desktop runtime — verified on
-**0.2.2-rc.1** and **0.2.2-rc.3** — with a deterministic mock LLM (no real API
+against the **installed** DeepSeek Harness desktop runtime or an isolated
+npm-installed release — verified on **0.2.2-rc.1**, **0.2.2-rc.2**,
+**0.2.2-rc.3**, and **0.2.2-rc.4** — with a deterministic mock LLM (no real API
 tokens) and no interference with the user's live Harness app or `~/.dsh` home.
 
 Everything lives under `tools/e2e/`. Every process the harness starts is spawned
@@ -19,7 +20,7 @@ tools/e2e/
 ├── mock-llm.mjs                  # deterministic OpenAI-chat-completions SSE mock provider (no deps)
 ├── link-repo-root.sh             # register this checkout as a linked root (single @deepseek-ai/* copy)
 ├── probe-imports.sh              # risk probe: absolute-path plugin importing @deepseek-ai/* (baseline + workaround)
-├── probe-tools.sh / .mjs         # model tool-path proof: scripted create_infini_goal call, tool row, goal
+├── probe-tools.sh / .mjs         # model tool-path proof: scripted create + update calls, policy prompt, tool row
 ├── probe-install.sh / .mjs       # installed-profile proof: scripts/install-profile.mjs path, commands, driver
 ├── probe-bundles.sh / .mjs       # bundle-packaging regression: main-only disable layer, legacy companion tolerance
 ├── smoke.sh                      # self-test: boot, boot graph, host+client fixture plugin, text turn, tool-call turn
@@ -42,7 +43,7 @@ tools/e2e/
 
 | Requirement | Notes |
 |---|---|
-| DeepSeek Harness **0.2.2-rc.1** – **0.2.2-rc.3** desktop app installed | harness uses the packaged launcher `/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh` (override with `DSH_BIN`) |
+| DeepSeek Harness **0.2.2-rc.1** – **0.2.2-rc.4** | default launcher is the desktop app `/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh`; override `DSH_BIN` to test an npm-installed release |
 | Node.js **>= 24.9** on `PATH` | matches the repo `engines.node` (esbuild `target: node24`, SDK scripts); override with `DSH_E2E_NODE` |
 | `pnpm` + repo `node_modules` | `pnpm install` once; `suite.sh`/`probe-tools.sh` need `pnpm build` |
 | free TCP ports **>= 34000** | `DSH_E2E_WEB_PORT` (34000) and `DSH_E2E_LLM_PORT` (34100) |
@@ -81,7 +82,7 @@ tools/e2e/suite.sh --fresh
 tools/e2e/probe-imports.sh
 # -> e2e probe: PASS
 
-# 4. model tool-path proof (scripted create_infini_goal tool call)
+# 4. model tool-path proof (scripted create + update_infini_goal calls)
 tools/e2e/probe-tools.sh
 # -> PROBE TOOLS PASS
 
@@ -182,7 +183,15 @@ Ports below 34000 are refused outright.
 
 ---
 
-## Discovered facts (DSH 0.2.2-rc.1, re-verified on 0.2.2-rc.3)
+## Discovered facts (DSH 0.2.2-rc.1, re-verified on rc.2, rc.3, rc.4)
+
+### Version matrix (2026-11-18)
+
+Each npm-installed release was run with its own `DSH_HOME`, profile, and port
+pair. `suite.sh --fresh` passed 9/9 steps, `probe-tools.sh` 14/14 checks
+(tool registration, system prompt, `create_infini_goal`, `update_infini_goal`),
+`probe-install.sh` 26/26, and `probe-bundles.sh` 61/61 on **rc.1, rc.2, rc.3,
+and rc.4**. See `docs/COMPATIBILITY.md` for the exact commands and shims.
 
 ### What moved in DSH 0.2.2-rc.3
 
@@ -200,9 +209,10 @@ suite moved, and both have feature-detected shims in the plugin:
 - The `ProjectionDefinition` schema types are now bound to `zod@4.6.6`; the
   repo's SDK devDependencies and the core plugin's `zod` peer follow it.
 
-Evidence on rc.3: `suite.sh --fresh` (pacing / quiet window / pause),
-`probe-tools.sh` (scripted `create_infini_goal`), and `probe-install.sh`
-(real install path, commands, tools, automatic round) all PASS.
+Evidence on rc.1–rc.4: `suite.sh --fresh` (pacing / quiet window / pause),
+`probe-tools.sh` (scripted `create_infini_goal` + `update_infini_goal`, system
+prompt policy), `probe-install.sh` (real install path, commands, tools,
+automatic round), and `probe-bundles.sh` (61 checks) all PASS on every release.
 
 ### CLI / profile / patches
 
@@ -510,7 +520,7 @@ companion checks prove the user-facing layers:
 |---|---|---|---|
 | 1 | Browser UI bar + pause interaction | Browser MCP (manual, documented below) | client slot registration, projection stream, command dispatch loop |
 | 2 | Real `/infini-goal` host command | browser composer + `commands/execute` over `/api` | command row, grammar, rendered status text |
-| 3 | Model tool path | `probe-tools.sh` | tool row, scripted `create_infini_goal` call, host authority check, domain mutation |
+| 3 | Model tool path | `probe-tools.sh` | tool row, system prompt policy, scripted `create_infini_goal` and `update_infini_goal` calls, host authority check, domain mutations |
 | 4 | Installed-profile mode | `probe-install.sh` | `scripts/install-profile.mjs` user path, bundle composition, no load errors, native goal off by default |
 | 5 | Bundle packaging + upgrade path | `probe-bundles.sh` | main bundle embeds the disable layer, legacy companion deselection, tolerated duplicate ids, absence of native goal |
 
@@ -647,7 +657,9 @@ on the installed composition and asserts:
 
 Boots the suite composition with a mock scenario whose first completion is an
 OpenAI `tool_calls` chunk for `create_infini_goal` (objective
-`E2E model tool goal via scripted mock`), then:
+`E2E model tool goal via scripted mock`), then sends a second human prompt after
+pausing the goal and replacing the scenario with an `update_infini_goal`
+(action `edit`) call carrying the paused goal's exact id/revision:
 
 ```
 HTTP human prompt -> mock streams tool_call create_infini_goal(objective)
@@ -655,6 +667,10 @@ HTTP human prompt -> mock streams tool_call create_infini_goal(objective)
                      because the prompt is a real user message in the open turn)
                   -> tool result returns the created goal view to the model
                   -> mock streams the scripted final text "MODEL TOOL GOAL CREATED"
+control pause      -> goal revision advances, automatic rounds stop
+HTTP human prompt -> mock streams tool_call update_infini_goal(id, revision, edit)
+                  -> host executes the edit, returns the updated goal view
+                  -> mock streams "MODEL UPDATE TOOL RAN"
 ```
 
 Verified output (`tools/e2e/probe-tools.sh`, isolated root `/tmp/dsh-e2e-tools`,
@@ -671,6 +687,11 @@ PASS tool/result for create_infini_goal is not an error — {"goal":{"id":"infin
 PASS final assistant text is the scripted continuation — ["MODEL TOOL GOAL CREATED"]
 PASS ctx.infiniGoals reports the goal created by the tool — {"phase":"active",...}
 PASS created goal is active
+PASS model emitted tool/call update_infini_goal — {"goal_id":"infinigoal-...","revision":2,"action":"edit",...}
+PASS tool/result for update_infini_goal is not an error — {"goal":{"phase":"paused",...},"schedule":null}
+PASS final update text is the scripted continuation — ["MODEL UPDATE TOOL RAN"]
+PASS ctx.infiniGoals reports the updated objective — {"phase":"paused",...}
+PASS updated goal keeps the paused phase
 PROBE TOOLS PASS
 ```
 
@@ -678,7 +699,7 @@ Evidence files: `/tmp/dsh-e2e-tools/smoke/probe-tools.log` and
 `probe-tools-events.json` (full durable event page; tool-role message shape
 `data.message.{toolCallId,isError,content}`).
 
-This proves the model tool path end-to-end, including the direct-human
+This proves the model tool path end-to-end for both write tools, including the direct-human
 authority check: `create_infini_goal` requires
 `source.kind === 'user'` in the open turn, `agent.status === 'running'` and the
 agent to be the exact registry instance.

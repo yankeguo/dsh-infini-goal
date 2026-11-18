@@ -3,8 +3,9 @@
  *
  * Adapts the official `tool-goal` authority model: a mutating call must be
  * authorized either by host-attested direct human input in the current root
- * agent turn, or — for `complete` and `blocked` only — by the exact admitted
- * automatic round of the current goal.
+ * agent turn, or — for the operations that stop or finish the goal (`pause`,
+ * `complete`, `blocked`) — by the exact admitted automatic round of the
+ * current goal. Non-human user-message sources never authorize a change.
  *
  * @module @yankeguo/dsh-tool-infini-goal/authority
  */
@@ -115,6 +116,10 @@ export function isDirectHumanSource(source: MessageSource): boolean {
   return source.kind === 'user'
 }
 
+/** Shared explanation for user-message sources that can never grant authority. */
+const NON_HUMAN_SOURCE_NOTE =
+  '; scheduled prompts, subagent messages, agent-team messages, other agent messages, and runtime notices never authorize a goal change'
+
 /**
  * Narrow one user-message source to the source of an admitted automatic
  * infini-goal round, revalidating the structural fields at runtime so a
@@ -207,7 +212,31 @@ function hasDirectHumanInput(ctx: Context, execution: InfiniGoalToolExecution): 
  */
 export function requireDirectHuman(ctx: Context, execution: InfiniGoalToolExecution): void {
   if (hasDirectHumanInput(ctx, execution)) return
-  reject('this infini-goal operation requires a direct human turn on a top-level agent')
+  reject(
+    'this infini-goal operation requires a direct human turn on a top-level agent'
+    + NON_HUMAN_SOURCE_NOTE,
+  )
+}
+
+/**
+ * Resolve pause authority from direct human input or the exact current goal round.
+ * Pausing never increases autonomy, so the goal's own round may stop it.
+ * @param ctx - Context carrying the live agent graph.
+ * @param execution - authenticated current tool execution.
+ * @param goal - the current goal, when one exists.
+ * @returns the direct-human or exact-goal-round authority grant.
+ * @throws {HarnessError} `INFINI_GOAL_TOOL_AUTHORITY_REQUIRED` when neither applies.
+ */
+export function pauseAuthority(
+  ctx: Context,
+  execution: InfiniGoalToolExecution,
+  goal: InfiniGoalView | undefined,
+): InfiniGoalToolAuthority {
+  if (hasDirectHumanInput(ctx, execution)) return { kind: 'direct-human' }
+  if (goal !== undefined && openTurnHasInfiniGoalRound(execution, goal)) {
+    return { kind: 'goal-round', goal }
+  }
+  return reject('pause requires a direct human turn or the current infini-goal round' + NON_HUMAN_SOURCE_NOTE)
 }
 
 /**
@@ -227,5 +256,8 @@ export function completionAuthority(
   if (goal !== undefined && openTurnHasInfiniGoalRound(execution, goal)) {
     return { kind: 'goal-round', goal }
   }
-  return reject('complete and blocked require a direct human turn or the current infini-goal round')
+  return reject(
+    'complete and blocked require a direct human turn or the current infini-goal round'
+    + NON_HUMAN_SOURCE_NOTE,
+  )
 }

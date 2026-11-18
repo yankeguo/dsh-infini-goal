@@ -213,6 +213,19 @@ function goalRoundTurn(harness: Harness): void {
   ])
 }
 
+/** Grant a scheduled-task delivery source for the next call. */
+function scheduleTurn(harness: Harness): void {
+  harness.setEvents([turnStartEvent(0), userMessageEvent(1, { kind: 'schedule' })])
+}
+
+/** Grant a message relayed by another agent for the next call. */
+function agentMessageTurn(harness: Harness): void {
+  harness.setEvents([
+    turnStartEvent(0),
+    userMessageEvent(1, { kind: 'agent-message', form: 'relay', senderSessionId: 'parent-session' }),
+  ])
+}
+
 /** The value returned by the tools, narrowed for assertions. */
 interface ToolValue {
   readonly goal: null | {
@@ -315,6 +328,19 @@ describe('create_infini_goal', () => {
   it('requires direct human authority', async () => {
     const harness = boot()
     await expect(harness.call('create_infini_goal', { objective: 'Ship the docs' }))
+      .rejects.toMatchObject({
+        code: 'INFINI_GOAL_TOOL_AUTHORITY_REQUIRED',
+        message: expect.stringContaining('never authorize'),
+      })
+  })
+
+  it('rejects scheduled-task and other-agent sources', async () => {
+    const harness = boot()
+    scheduleTurn(harness)
+    await expect(harness.call('create_infini_goal', { objective: 'Ship the docs' }))
+      .rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_AUTHORITY_REQUIRED' })
+    agentMessageTurn(harness)
+    await expect(harness.call('create_infini_goal', { objective: 'Ship the docs' }))
       .rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_AUTHORITY_REQUIRED' })
   })
 
@@ -375,6 +401,61 @@ describe('update_infini_goal', () => {
       .rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_AUTHORITY_REQUIRED' })
     await expect(harness.call('update_infini_goal', { ...ref, action: 'config', min_interval: '2m' }))
       .rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_AUTHORITY_REQUIRED' })
+  })
+
+  it('allows pause from the exact current goal round', async () => {
+    const harness = boot()
+    humanTurn(harness)
+    const created = valueOf(await harness.call('create_infini_goal', { objective: 'Ship the docs' }))
+    const goal = created.goal
+    if (goal === null) throw new Error('expected a goal')
+    goalRoundTurn(harness)
+    const paused = valueOf(await harness.call('update_infini_goal', {
+      goal_id: goal.id,
+      revision: goal.revision,
+      action: 'pause',
+    }))
+    expect(paused.goal?.phase).toBe('paused')
+    expect(paused.schedule).toBeNull()
+  })
+
+  it('keeps edit, config, and resume human-only during an automatic round', async () => {
+    const harness = boot()
+    humanTurn(harness)
+    const created = valueOf(await harness.call('create_infini_goal', { objective: 'Ship the docs' }))
+    const goal = created.goal
+    if (goal === null) throw new Error('expected a goal')
+    goalRoundTurn(harness)
+    const ref = { goal_id: goal.id, revision: goal.revision }
+    await expect(harness.call('update_infini_goal', { ...ref, action: 'edit', objective: 'Ship v2' }))
+      .rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_AUTHORITY_REQUIRED' })
+    await expect(harness.call('update_infini_goal', { ...ref, action: 'config', min_interval: '2m' }))
+      .rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_AUTHORITY_REQUIRED' })
+    await expect(harness.call('update_infini_goal', { ...ref, action: 'resume' }))
+      .rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_AUTHORITY_REQUIRED' })
+  })
+
+  it('rejects scheduled-task and other-agent sources for every update action', async () => {
+    const harness = boot()
+    humanTurn(harness)
+    const created = valueOf(await harness.call('create_infini_goal', { objective: 'Ship the docs' }))
+    const goal = created.goal
+    if (goal === null) throw new Error('expected a goal')
+    const ref = { goal_id: goal.id, revision: goal.revision }
+    for (const turn of [scheduleTurn, agentMessageTurn]) {
+      turn(harness)
+      for (const action of ['edit', 'config', 'pause', 'resume', 'complete', 'blocked'] as const) {
+        const args = action === 'edit'
+          ? { ...ref, action, objective: 'Ship v2' }
+          : action === 'config'
+            ? { ...ref, action, min_interval: '2m' }
+            : action === 'blocked'
+              ? { ...ref, action, blocked_reason: 'credentials expired' }
+              : { ...ref, action }
+        await expect(harness.call('update_infini_goal', args))
+          .rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_AUTHORITY_REQUIRED' })
+      }
+    }
   })
 
   it('edits the objective and pacing settings with direct human authority', async () => {

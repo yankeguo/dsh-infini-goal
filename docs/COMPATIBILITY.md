@@ -16,21 +16,41 @@ and the compatibility shims that let one build serve the whole range.
 | `zod` | `4.6.6` (the copy DSH 0.2.2-rc.3 builds against) |
 
 DSH checks a bundle's `engines.dsh` against the running version and skips a
-bundle outside the range. The unit suite/dev toolchain is pinned to the newest
-verified SDK (`0.2.2-rc.3`); the runtime shims below keep the older end of the
-range working.
+bundle outside the range. The unit suite/dev toolchain stays pinned to the
+installed desktop SDK (`0.2.2-rc.3`); the whole range is exercised through the
+real isolated E2E harness with each npm-installed DSH release.
 
 ## Verified matrix
 
+Verified 2026-11-18 on Node.js `26.13.0`. Each release was installed from npm
+into its own temporary prefix (`npm install @deepseek-ai/dsh@0.2.2-rc.N`); no
+test touched the user's `~/.dsh` or the installed desktop app.
+
 | DSH | Evidence | Result |
 | --- | --- | --- |
-| `0.2.2-rc.1` | v0.2.0 / v0.2.1 releases: `tools/e2e/suite.sh`, `probe-tools.sh`, `probe-install.sh`, `probe-bundles.sh` | pass |
-| `0.2.2-rc.3` (installed desktop app) | this change, 2026-11-17: `pnpm verify` (typecheck + 453 tests + build), `tools/e2e/suite.sh --fresh` (pacing, quiet window, pause), `probe-tools.sh` (scripted `create_infini_goal`), `probe-install.sh` (real `install-profile.mjs` path, commands, tools, automatic round), `probe-bundles.sh` (61-check bundle regression) | pass |
+| `0.2.2-rc.1` (`latest`) | `suite.sh --fresh` → **9/9 steps PASS**; `probe-tools.sh` → **14/14 checks PASS** (tool registration, system prompt, `create_infini_goal`, `update_infini_goal`); `probe-install.sh` → **26/26 checks PASS**; `probe-bundles.sh` → **61/61 checks PASS** | pass |
+| `0.2.2-rc.2` | same four commands, same results | pass |
+| `0.2.2-rc.3` | same four commands, same results | pass |
+| `0.2.2-rc.4` (`next`) | same four commands, same results | pass |
 
-The 0.2.2-rc.2 / rc.3 API changes were checked against the DSH build embedded
-in the installed desktop app (`0.2.2-rc.3`, build commit
-`6b729fedde0c8fd03af7afdf5a711aa64fe87c3b`); the local DSH source checkout
-only reaches `0.2.2-rc.1`.
+Repository checks on the rc.3-pinned dev toolchain: `pnpm verify` =
+typecheck + **24 test files / 459 tests** + build of all 9 artifacts.
+
+The installed-profile probes use `scripts/install-profile.mjs` (symlink +
+bundle selection) and therefore exercise the real Loader composition,
+`engines.dsh` gate, client row, command catalogue, driver rounds, projection,
+and the built-in-goal disable layer on every release. The bundle probe covers
+both the main-bundle-only install and the legacy-companion upgrade path.
+
+### What actually differs across the range
+
+| Surface | rc.1 | rc.2 | rc.3 | rc.4 | Handling |
+| --- | --- | --- | --- | --- | --- |
+| `AgentRegistry.roots()` | present | removed | removed | removed | feature-detect; header fallback |
+| Subagent wait method | `waitForChildren()` | `waitForTreeWork()` | `waitForTreeWork()` | `waitForTreeWork()` | feature-detect; neither = nothing to wait for |
+| `SessionHeader.origin` / `delegationDepth` | present | present | present | present | used by the rc.2+ root/fallback check |
+| `dsh-llm` failure codes | — | — | — | adds `CONTENT_REFUSED` | additive only; no import used by this suite removed |
+| Cordis / schemastery peers | `~4.1.0` / `~3.19.0` | same | same | same | no peer conflict |
 
 ## Compatibility shims
 
@@ -45,11 +65,12 @@ on rc.3 every authorized call failed with:
 TypeError: ctx.agents.roots is not a function
 ```
 
-`packages/tool/src/authority.ts` (`isRuntimeRoot`) now prefers `roots()` when
-the registry still has it — preserving the exact rc.1 runtime-ownership
-semantics — and otherwise requires the exact live agent and
+`packages/tool/src/authority.ts` (`isRuntimeRoot`) prefers `roots()` when the
+registry still has it — preserving the exact rc.1 runtime-ownership semantics —
+and otherwise requires the exact live agent and
 `session.header.origin !== 'subagent'`, which is what the official
-`dsh-tool-goal` authority does on rc.3.
+`dsh-tool-goal` authority does on rc.2+. Both branches are exercised by the
+real per-version probes (rc.1 through `roots()`, rc.2–rc.4 through the header).
 
 ### `SubagentsService.waitForChildren()` became `waitForTreeWork()` (0.2.2-rc.2)
 
@@ -72,17 +93,22 @@ the projection registration. The repo's `zod` devDependency and the
 ### Checked and unchanged
 
 - Exported symbols of every SDK package the host plugins import are identical
-  between 0.2.2-rc.1 and 0.2.2-rc.3 except additive entries
-  (`dsh-llm`: `LLM_FAILURE_CODES`, `RETRY_CODE_CHOICES`; `dsh-tools`:
+  between 0.2.2-rc.1 and 0.2.2-rc.4 except additive entries (`dsh-llm`:
+  `LLM_FAILURE_CODES`, `RETRY_CODE_CHOICES`, `CONTENT_REFUSED`; `dsh-tools`:
   `ToolContextUnavailableError`; `dsh-subagent`: `ROOT_AGENT_NAME`). No import
   used by this suite was removed.
+- rc.2 ↔ rc.3 ↔ rc.4: no source-level change was found in the agent, session,
+  tools, system-prompt, session-projection, session-controller, commands, or
+  subagent packages used here; rc.4's only difference in the exercised set is
+  the additive `dsh-llm` failure code above.
 - The browser shell still seeds `@deepseek-ai/dsh-client-ui-slots`,
   `-primitives`, and `-dockkit` in its platform module table, so the client
   bundle's externals and `conversation.input.dock` slot remain valid.
 - `appendPluginRecord`, `pluginRecordOf`, `agentEvents`, `defineTool`,
   `ctx.tools.register`, `ctx.commands.register`, `ctx.systemPrompt.section`,
   `ctx.sessionProjections.register`, the agent/session event vocabulary, and
-  `session.snapshotEvents()` / `session.header` are present in rc.3.
+  `session.snapshotEvents()` / `session.header` are present in all four
+  releases.
 
 ## Re-verifying against a new DSH
 

@@ -31,7 +31,7 @@
 | 模型工具 | `get_infini_goal` / `create_infini_goal` / `update_infini_goal` |
 | 人类命令 | `/infini-goal`，可在不消耗模型轮次的情况下查看状态、配置节奏、暂停/恢复 |
 | 状态条 UI | composer 上方的 InfiniGoalBar：阶段、轮次、触发节奏、静默时段提示、暂停/恢复/清除 |
-| 权限模型 | 所有变更都需要人类授权或当前自动轮次授权，模型无法自说自话改目标（见[权限模型](#权限模型)） |
+| 权限模型 | 所有变更都需要人类授权；pause / complete / block 还可由当前自动轮次授权，模型无法自说自话改目标（见[权限模型](#权限模型)） |
 | 可共存 | 与官方 `dsh-goal` 的工具、命令、状态条互不同名；安装本 bundle 会默认关闭官方 goal |
 
 ## 界面
@@ -91,7 +91,7 @@ protocol/core 实例——其余依赖（例如 core 内联的 `zod`）打进产
 
 | 项 | 要求 |
 | --- | --- |
-| DSH | `0.2.2-rc.1` – `0.2.2-rc.3`（声明范围 `>=0.2.2-rc.1 <0.3.0`；已在 rc.1 与 rc.3 验证，见 [DSH 兼容性](docs/COMPATIBILITY.md)） |
+| DSH | `0.2.2-rc.1` – `0.2.2-rc.4`（声明范围 `>=0.2.2-rc.1 <0.3.0`；每个 rc 均已验证，见 [DSH 兼容性](docs/COMPATIBILITY.md)） |
 | Node.js | ≥ 24.9（仅本地构建 / 发布 / E2E 需要；从 npm 安装插件不需要本机 Node） |
 | pnpm | 12.x（CI 固定 `pnpm@12.16.1`） |
 | Web UI | DSH 桌面端或 `dsh web`；状态条只在 Web 端渲染 |
@@ -151,9 +151,9 @@ pnpm install:profile                  # 先 pnpm build，再重新链接即生�
 pnpm uninstall:profile                # 移除链接与 bundle 选择
 ```
 
-支持的 0.2.2 版本线覆盖 `0.2.2-rc.1` 到 `0.2.2-rc.3`：rc.2 / rc.3 的插件 API 变化由探测式兼容层处理
-（见 [DSH 兼容性](docs/COMPATIBILITY.md)）。升级 DSH 大版本（0.3）前需要更新插件 / bundle 包的
-`engines.dsh` 并回归；不兼容的 bundle 会被 DSH 跳过。
+支持的 0.2.2 版本线覆盖 `0.2.2-rc.1` 到 `0.2.2-rc.4`：rc.2 / rc.3 / rc.4 的插件 API 变化由探测式
+兼容层处理（见 [DSH 兼容性](docs/COMPATIBILITY.md)）。升级 DSH 大版本（0.3）前需要更新插件 /
+bundle 包的 `engines.dsh` 并回归；不兼容的 bundle 会被 DSH 跳过。
 
 从「主 bundle 尚未内置关闭层」的旧版本升级时：如果 profile 仍选中
 `@yankeguo/dsh-disable-goal-bundle`，请在 Plugins 页面停用/移除它（或重跑
@@ -320,11 +320,20 @@ Host 命令侧 pause / complete / block / clear 只 abort 正在运行的自动�
   以及 `interval` / `quiet` / `timezone` 等节奏配置。
 - **模型工具**：
   - `create_infini_goal` 需要当前 turn 中存在来自 runtime root agent 的**直接人类消息**；
-  - `update_infini_goal` 的 `edit`、`config`、`pause`、`resume` 同样需要直接人类消息；
-  - `complete` 与 `blocked` 额外允许“当前目标的自动轮次”本身授权；
+  - `update_infini_goal` 的 `edit`、`config`、`resume` 同样需要直接人类消息；
+  - `pause`、`complete` 与 `blocked` 额外允许“当前目标的自动轮次”本身授权。pause 只停止
+    自主续跑，不会创建或改写目标，因此自动轮次可以不经过人类直接 pause；
   - 在自动轮次中报告 `blocked` 时，还要求已达到 `blockedAfterConsecutiveRounds`（默认 3）；
+  - 定时任务提示、subagent 消息、agent-team 消息、其他 agent 消息和运行期通知永不授权
+    目标变更——因为调用方可以自行制造这些消息；
   - 授权判定基于 Session 事件（open turn 内的 `user/message` source、root agent 身份），
     不采信模型的自我声明。
+
+由其他 agent、定时任务或运行期通知开启的 turn 不包含直接人类消息。这样的 Session 即使可见
+文本看起来像用户请求，也不能 create/edit/config/resume 目标。这是有意的：这些 source 可以由
+调用方自行制造，信任它们等于把非人类消息变成目标授权。合法路径是 Session 内的直接人类消息、
+`/infini-goal ...` 命令，或（对 pause/complete/blocked）目标自己的自动轮次。
+
 - **UI**：状态条按钮只是提交 `/infini-goal ...` 命令，没有独立 Remote API 或更高权限。
 - **安全边界**：插件运行在 Host 进程内，安装第三方插件等同于信任其代码；本套件不改变 DSH
   的沙箱 / 权限模式，也不额外提供任何提权入口。
@@ -339,9 +348,9 @@ Host 命令侧 pause / complete / block / clear 只 abort 正在运行的自动�
 - **UI 操作经命令**：状态条按钮发送 `/infini-goal ...` 命令，不引入自定义 Typert Remote。
 - **倒计时是本地计算**：状态条按 projection 与本地每秒计算节奏行，允许秒级显示偏差；
   实际是否触发由驱动器用同一份 `planTrigger` 计算。
-- **兼容性**：插件 / bundle 包声明 `engines.dsh: >=0.2.2-rc.1 <0.3.0`；已在 `0.2.2-rc.1` 与
-  `0.2.2-rc.3` 验证，rc.2 / rc.3 的 API 变化由探测式兼容层处理（见 [DSH 兼容性](docs/COMPATIBILITY.md)）；
-  DSH 升级到 0.3 前需要更新插件。
+- **兼容性**：插件 / bundle 包声明 `engines.dsh: >=0.2.2-rc.1 <0.3.0`；已在 `0.2.2-rc.1`、
+  `0.2.2-rc.2`、`0.2.2-rc.3`、`0.2.2-rc.4` 验证，rc.2+ 的 API 变化由探测式兼容层处理（见
+  [DSH 兼容性](docs/COMPATIBILITY.md)）；DSH 升级到 0.3 前需要更新插件。
 - **单 Session 语义**：目标与轮次属于当前 Session；本插件不提供跨 Session 共享或汇总目标。
 
 ## 故障排查

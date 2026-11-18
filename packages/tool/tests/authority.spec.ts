@@ -14,6 +14,7 @@ import {
   isRuntimeRoot,
   openTurnHasDirectHumanInput,
   openTurnHasInfiniGoalRound,
+  pauseAuthority,
   requireDirectHuman,
 } from '../src/authority.ts'
 import type { InfiniGoalToolExecution } from '../src/authority.ts'
@@ -41,6 +42,23 @@ const ROUND_SOURCE = {
   goalId: GOAL.id,
   revision: GOAL.revision,
   round: GOAL.roundsStarted,
+}
+
+/** One scheduled-task delivery or schedule change notice source. */
+const SCHEDULE_SOURCE = { kind: 'schedule' }
+
+/** One message relayed by another agent. */
+const AGENT_MESSAGE_SOURCE = { kind: 'agent-message', form: 'relay', senderSessionId: 'parent-session' }
+
+/** One Agent Team message. */
+const TEAM_MESSAGE_SOURCE = { kind: 'team-message', form: 'relay', senderSessionId: 'team-session' }
+
+/** One subagent-settled runtime notice. */
+const SUBAGENT_SETTLED_SOURCE = {
+  kind: 'subagent-settled',
+  form: 'notice',
+  summary: 'a subagent settled',
+  senderSessionId: 'child-session',
 }
 
 /** Build one fake user-message event carrying the supplied source. */
@@ -177,6 +195,25 @@ describe('openTurnHasInfiniGoalRound', () => {
   })
 })
 
+describe('pauseAuthority', () => {
+  it('grants goal-round authority for pause without human input', () => {
+    const exec = execution([turnStartEvent(0), userEvent(1, ROUND_SOURCE)])
+    expect(pauseAuthority(fakeContext([]), exec, GOAL)).toEqual({ kind: 'goal-round', goal: GOAL })
+  })
+
+  it('accepts direct human input and rejects non-human sources', () => {
+    const agent = {} as Agent
+    const human = executionFor(agent, [turnStartEvent(0), userEvent(1, { kind: 'user' })])
+    expect(pauseAuthority(fakeContext([agent]), human, GOAL)).toEqual({ kind: 'direct-human' })
+    for (const source of [SCHEDULE_SOURCE, AGENT_MESSAGE_SOURCE, TEAM_MESSAGE_SOURCE, SUBAGENT_SETTLED_SOURCE]) {
+      const exec = executionFor(agent, [turnStartEvent(0), userEvent(1, source)])
+      expect(() => pauseAuthority(fakeContext([agent]), exec, GOAL)).toThrow(/pause requires/)
+    }
+    const stale = execution([turnStartEvent(0), userEvent(1, { ...ROUND_SOURCE, round: 1 })])
+    expect(() => pauseAuthority(fakeContext([]), stale, GOAL)).toThrow(/pause requires/)
+  })
+})
+
 describe('completionAuthority', () => {
   it('grants direct-human authority on a runtime root', () => {
     const agent = {} as Agent
@@ -193,13 +230,18 @@ describe('completionAuthority', () => {
     expect(completionAuthority(fakeContext([]), exec, GOAL)).toEqual({ kind: 'goal-round', goal: GOAL })
   })
 
-  it('rejects a call with neither authority', () => {
+  it('rejects a call with neither authority and non-human sources', () => {
     const exec = execution([turnStartEvent(0), userEvent(1, { kind: 'user' })])
     expect(() => completionAuthority(fakeContext([]), exec, GOAL)).toThrow(HarnessError)
     try {
       completionAuthority(fakeContext([]), exec, GOAL)
     } catch (error) {
       expect((error as HarnessError).code).toBe('INFINI_GOAL_TOOL_AUTHORITY_REQUIRED')
+      expect((error as HarnessError).message).toContain('never authorize')
+    }
+    for (const source of [SCHEDULE_SOURCE, AGENT_MESSAGE_SOURCE, TEAM_MESSAGE_SOURCE, SUBAGENT_SETTLED_SOURCE]) {
+      const nonHuman = execution([turnStartEvent(0), userEvent(1, source)])
+      expect(() => completionAuthority(fakeContext([]), nonHuman, GOAL)).toThrow(/complete and blocked require/)
     }
   })
 })
@@ -214,7 +256,12 @@ describe('requireDirectHuman', () => {
     }
     expect(() => requireDirectHuman(fakeContext([agent]), human)).not.toThrow()
     const round = execution([turnStartEvent(0), userEvent(1, ROUND_SOURCE)])
-    expect(() => requireDirectHuman(fakeContext([agent]), { ...round, agent })).toThrow(/direct human turn/)
+    expect(() => requireDirectHuman(fakeContext([agent]), { ...round, agent }))
+      .toThrow(/direct human turn/)
+    for (const source of [SCHEDULE_SOURCE, AGENT_MESSAGE_SOURCE, TEAM_MESSAGE_SOURCE, SUBAGENT_SETTLED_SOURCE]) {
+      const nonHuman = executionFor(agent, [turnStartEvent(0), userEvent(1, source)])
+      expect(() => requireDirectHuman(fakeContext([agent]), nonHuman)).toThrow(/never authorize/)
+    }
   })
 })
 

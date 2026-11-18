@@ -258,8 +258,8 @@ describe('plugin metadata', () => {
 
   it('names the install-entry bundle as a suite in Chinese', () => {
     // Bundles are the install entry: 「…套件」 keeps the bundle distinguishable
-    // from the core plugin 「无限目标」 in the Plugins list (matches the naming
-    // used by other DSH bundles such as 「DevLead 套件」).
+    // from the core plugin 「无限目标」 in the Plugins list, matching the naming
+    // used by other DSH bundle suites.
     expect(readLocaleMeta(BUNDLE, 'zh').title).toBe('无限目标套件')
   })
 })

@@ -270,7 +270,8 @@ Round prompt（模型可见）：`<infini_goal_round>` 块，包含 objective、
 | --- | --- | --- |
 | `edit` | direct human | 改 objective 和/或 pacing 字段 |
 | `config` | direct human | 只改 pacing 字段；带 objective 会被拒绝 |
-| `pause` / `resume` | direct human | 生命周期 |
+| `pause` | direct human 或当前 goal round | 生命周期；只停止自主续跑，不增加自主性 |
+| `resume` | direct human | 生命周期；从 paused / blocked 恢复 |
 | `complete` | direct human 或当前 goal round | 从 active / paused / blocked 进入 complete |
 | `blocked` | direct human 或当前 goal round | 从 active 进入 blocked；goal round 授权时要求 `roundsStarted >= blockedAfterConsecutiveRounds`，否则报 `INFINI_GOAL_TOOL_BLOCK_THRESHOLD`；direct human 不受该阈值限制 |
 
@@ -279,7 +280,12 @@ Round prompt（模型可见）：`<infini_goal_round>` 块，包含 objective、
   `agent.status === 'running'`、`ctx.agents.currentInitiator() === agent` 且存在 open model turn。
 - **goal round** 的判定：open turn 内存在 `source.kind === 'infini-goal'` 且
   `goalId` / `revision` / `round === roundsStarted` 与当前目标完全匹配的自动轮次消息。
-  goal round 授权只覆盖 `complete` / `blocked`，不覆盖 create / edit / config / pause / resume。
+  goal round 授权覆盖 `pause` / `complete` / `blocked`，不覆盖 create / edit / config / resume
+  （pause 只降低自主性，因此即使没有人类在场也允许）。
+- 由其他 agent、定时任务或运行期通知开启的 turn 没有 direct human 消息；这类 Session 即使
+  文本看起来像用户请求，也不能 create/edit/config/resume。这是有意的 fail-closed：这些
+  source 可由调用方自行制造，信任它们会把非人类消息变成目标授权。合法路径是直接人类消息、
+  `/infini-goal ...` 命令，或（对 pause/complete/blocked）目标自己的自动轮次。
 - `complete` / `blocked` 在 goal round 授权下会 `exec.deferContext(createUserMessage({ source:
   {kind:'tool-infini-goal', form:'notice', summary} }))` 注入收尾提示；direct human 授权不注入。
 - 工具错误码（`HarnessError.code`，工具层自有）：
@@ -288,7 +294,7 @@ Round prompt（模型可见）：`<infini_goal_round>` 块，包含 objective、
   | --- | --- |
   | `INFINI_GOAL_TOOL_AGENT_REQUIRED` | 工具调用没有 calling agent |
   | `INFINI_GOAL_TOOL_DRIVER_REQUIRED` | 不是精确的 live agent / 非 running / 不是 currentInitiator / 没有 open model turn |
-  | `INFINI_GOAL_TOOL_AUTHORITY_REQUIRED` | 缺少 direct human（create/edit/config/pause/resume）或 direct human 与 goal round 都没有（complete/blocked） |
+  | `INFINI_GOAL_TOOL_AUTHORITY_REQUIRED` | 缺少 direct human（create/edit/config/resume）或 direct human 与 goal round 都没有（pause/complete/blocked）；定时任务、subagent / agent-team / 其他 agent 消息、运行期通知永不被接受 |
   | `INFINI_GOAL_TOOL_INVALID_ARGUMENT` | objective 为空、时长 / 静默时段 / 时区不可解析或越界、goal_id / revision 非法、edit/config 没有实际变更、config 带 objective、blocked_reason 缺失或为空 |
   | `INFINI_GOAL_TOOL_BLOCK_THRESHOLD` | goal round 授权下 `roundsStarted < blockedAfterConsecutiveRounds` 却要求 blocked |
 
@@ -448,6 +454,21 @@ bundle 的 `package.json` 声明 `dsh.bundle.patch` 与 `dsh.bundle.listedByDefa
 - rc.2 / rc.3 移除了 `ctx.agents.roots()`、把 `waitForChildren()` 改名为
   `waitForTreeWork()`，并让 projection schema 绑定 `zod@4.6.6`；兼容层与验证矩阵见
   [DSH 兼容性](COMPATIBILITY.md)。
+
+### 11.2 DSH 0.2.2-rc.1 – rc.4 兼容矩阵（2026-11-18）
+
+- 用 npm 独立安装 `@deepseek-ai/dsh@0.2.2-rc.{1,2,3,4}` 到 `/tmp` 隔离前缀；每个版本均以
+  独立 `DSH_HOME` / profile / 端口运行真实 harness，不触碰安装版 desktop app 与用户 `~/.dsh`。
+- 每个版本的四项实测：
+  `suite.sh --fresh` → 9/9 steps；`probe-tools.sh` → 14/14（工具注册、system prompt、
+  `create_infini_goal`、`update_infini_goal`）；`probe-install.sh` → 26/26；
+  `probe-bundles.sh` → 61/61。
+- 仓库单元 / 构建仍以 rc.3 devDependency 为准：`pnpm verify` → 24 个测试文件 / 459 个用例 +
+  9 个产物。
+- 关键差异与处理：rc.1 `roots()` / rc.2+ header `origin`+`delegationDepth` 已由
+  `isRuntimeRoot` 双分支覆盖；rc.1 `waitForChildren()` / rc.2+ `waitForTreeWork()` 已由
+  `waitForSubagentWork` 探测；rc.4 仅在 `dsh-llm` 新增 `CONTENT_REFUSED`，无删除/改名。
+  详见 [DSH 兼容性](COMPATIBILITY.md)。
 
 ## 12. 实现记录与偏差
 

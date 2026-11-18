@@ -34,7 +34,7 @@ Docs: [Design](docs/DESIGN.md) · [Publishing guide](docs/PUBLISHING.md) ·
 | Model tools | `get_infini_goal` / `create_infini_goal` / `update_infini_goal` |
 | Human command | `/infini-goal` — inspect status, configure pacing, pause/resume without spending model rounds |
 | Status-bar UI | InfiniGoalBar above the composer: phase, rounds, trigger pacing, quiet-window hint, pause/resume/clear |
-| Permission model | Every change needs human authorization or the current automatic round's authorization; the model cannot rewrite the goal on its own (see [Permission model](#permission-model)) |
+| Permission model | Every change needs human authorization, or the current automatic round's authorization for pause/complete/block; the model cannot rewrite the goal on its own (see [Permission model](#permission-model)) |
 | Coexistence | Tool, command, and status-bar names do not collide with the official `dsh-goal`; installing the bundle also switches the official goal off by default |
 
 ## UI
@@ -98,7 +98,7 @@ runtime asset and is not transpiled.
 
 | Item | Requirement |
 | --- | --- |
-| DSH | `0.2.2-rc.1` – `0.2.2-rc.3` (declared range `>=0.2.2-rc.1 <0.3.0`; verified on rc.1 and rc.3 — see [DSH compatibility](docs/COMPATIBILITY.md)) |
+| DSH | `0.2.2-rc.1` – `0.2.2-rc.4` (declared range `>=0.2.2-rc.1 <0.3.0`; every rc verified — see [DSH compatibility](docs/COMPATIBILITY.md)) |
 | Node.js | ≥ 24.9 (only needed for local build / publish / E2E; installing the plugin from npm does not need Node on this machine) |
 | pnpm | 12.x (CI pins `pnpm@12.16.1`) |
 | Web UI | DSH desktop app or `dsh web`; the status bar only renders in the Web UI |
@@ -163,7 +163,7 @@ pnpm install:profile                  # run pnpm build first; re-linking applies
 pnpm uninstall:profile                # remove the links and bundle selection
 ```
 
-The supported 0.2.2 line runs from `0.2.2-rc.1` through `0.2.2-rc.3`: the rc.2/rc.3 plugin-API
+The supported 0.2.2 line runs from `0.2.2-rc.1` through `0.2.2-rc.4`: the rc.2/rc.3/rc.4 plugin-API
 changes are handled by feature-detected shims (see [DSH compatibility](docs/COMPATIBILITY.md)).
 Before upgrading DSH across a major version (0.3), update the plugins' / bundles' `engines.dsh` and
 regression-test; incompatible bundles are skipped by DSH.
@@ -347,14 +347,24 @@ create or rewrite a goal on its own judgment:
 - **Model tools**:
   - `create_infini_goal` requires a **direct human message** from the runtime root agent in the
     current turn;
-  - `edit`, `config`, `pause`, and `resume` on `update_infini_goal` likewise require a direct human
-    message;
-  - `complete` and `blocked` are additionally allowed under "the current goal's automatic round"
-    authorization;
+  - `edit`, `config`, and `resume` on `update_infini_goal` likewise require a direct human message;
+  - `pause`, `complete`, and `blocked` are additionally allowed under "the current goal's automatic
+    round" authorization. Pause only stops autonomy, so the goal's own round may use it without a
+    human; it does not create or rewrite the goal;
   - reporting `blocked` in an automatic round also requires `blockedAfterConsecutiveRounds`
     (default 3) to be reached;
+  - scheduled prompts, subagent messages, agent-team messages, other agent messages, and runtime
+    notices never authorize a goal change, because the calling side can create them;
   - authorization is determined from Session events (the `user/message` source inside the open turn,
     root-agent identity), not from the model's self-report.
+
+A turn opened by another agent, a scheduled task, or a runtime notice contains no direct human
+message. Such a Session therefore cannot create/edit/config/resume a goal even when the visible text
+reads like a user request. This is deliberate: those sources can be produced by the calling side, so
+trusting them would turn a non-human message into goal authority. The legal paths are a direct human
+message in the Session, the `/infini-goal ...` command, or — for pause/complete/blocked — the goal's
+own automatic round.
+
 - **UI**: status-bar buttons only submit `/infini-goal ...` commands; there is no independent Remote
   API or higher privilege.
 - **Security boundary**: the plugin runs inside the host process, so installing a third-party plugin
@@ -376,8 +386,9 @@ create or rewrite a goal on its own judgment:
   and local per-second computation, so second-level display drift is possible; the actual trigger is
   computed by the driver with the same `planTrigger`.
 - **Compatibility**: plugin / bundle packages declare `engines.dsh: >=0.2.2-rc.1 <0.3.0`; verified on
-  `0.2.2-rc.1` and `0.2.2-rc.3` (the rc.2/rc.3 API changes are handled by feature-detected shims — see
-  [DSH compatibility](docs/COMPATIBILITY.md)). The plugins must be updated before DSH moves to 0.3.
+  `0.2.2-rc.1`, `0.2.2-rc.2`, `0.2.2-rc.3`, and `0.2.2-rc.4` (the rc.2+ API changes are handled by
+  feature-detected shims — see [DSH compatibility](docs/COMPATIBILITY.md)). The plugins must be
+  updated before DSH moves to 0.3.
 - **Single-session semantics**: goals and rounds belong to the current Session; the plugin offers no
   cross-session sharing or aggregation of goals.
 

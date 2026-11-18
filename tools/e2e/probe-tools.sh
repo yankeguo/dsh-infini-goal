@@ -10,8 +10,13 @@
 #                -> tool result returns to the model
 #                -> model streams the scripted final text
 #
+# probe-tools.mjs then pauses the goal through the control fixture, replaces
+# the mock scenario, sends a second human prompt, and asserts a real
+# `update_infini_goal` (action edit) call and result.
+#
 # Assertions: request/header advertises get/create/update_infini_goal; the
-# tool/call executed without error; the goal exists with the scripted objective.
+# system prompt carries the authority policy; both tool calls execute without
+# error; the goal exists/updates with the scripted objective.
 #
 # Usage: tools/e2e/probe-tools.sh
 # Requires: repo `pnpm build` + `node scripts/dev-patch.mjs` (suite.sh does both,

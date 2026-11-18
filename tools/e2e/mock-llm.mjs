@@ -27,6 +27,7 @@
  *   GET  /__mock/requests       -> JSONL-free array of logged requests
  *   POST /__mock/reset          -> reset the scenario cursor and request log
  *   GET  /__mock/scenario       -> current scenario and cursor
+ *   POST /__mock/scenario       -> replace the scenario, reset cursor/log
  *
  * Usage:
  *   node mock-llm.mjs --port 34100 --host 127.0.0.1 \
@@ -335,6 +336,31 @@ async function handleChatCompletions(req, res) {
   }
 }
 
+/** Replace the scenario and reset the cursor/log from one POST body. */
+async function handleScenarioReplace(req, res) {
+  const chunks = []
+  for await (const chunk of req) chunks.push(chunk)
+  let body
+  try {
+    body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+  } catch {
+    res.writeHead(400, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ ok: false, message: 'request body is not JSON' }))
+    return
+  }
+  if (body === null || typeof body !== 'object' || !Array.isArray(body.responses)) {
+    res.writeHead(400, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ ok: false, message: 'responses must be an array' }))
+    return
+  }
+  scenario = { responses: body.responses }
+  cursor = 0
+  requestLog = []
+  if (LOG_PATH !== undefined) writeFileSync(LOG_PATH, '')
+  res.writeHead(200, { 'content-type': 'application/json' })
+  res.end(JSON.stringify({ ok: true, responses: scenario.responses.length }))
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://mock-llm.internal')
 
@@ -359,6 +385,16 @@ const server = createServer((req, res) => {
   if (req.method === 'GET' && url.pathname === '/__mock/scenario') {
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify({ scenarioPath: SCENARIO_PATH ?? null, cursor, responses: scenario.responses }))
+    return
+  }
+  if (req.method === 'POST' && url.pathname === '/__mock/scenario') {
+    handleScenarioReplace(req, res).catch(error => {
+      console.error(`mock-llm: scenario handler failed: ${error.stack ?? error}`)
+      if (!res.headersSent) {
+        res.writeHead(500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, message: String(error?.message ?? error) }))
+      } else res.end()
+    })
     return
   }
   if (req.method === 'POST' && url.pathname === '/__mock/reset') {
