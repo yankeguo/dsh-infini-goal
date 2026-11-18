@@ -152,7 +152,7 @@ Uninstall: `pnpm uninstall:profile`.
 
 ```sh
 # Upgrade to a specific version (after publishing to npm)
-dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle@0.2.2
+dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle@0.2.3
 
 # Uninstall (DSH clears the selection of removed bundles the next time it loads the profile)
 dsh plugin --profile desktop remove @yankeguo/dsh-infini-goal-bundle
@@ -427,8 +427,8 @@ creates the GitHub Release:
 ```sh
 npm login                                                      # maintainer account with 2FA
 scripts/trusted-publishers.sh                                  # one-time stage-only trusted publishers
-node scripts/promote-release.mjs --version 0.2.2 --list-only   # review the staged uploads
-node scripts/promote-release.mjs --version 0.2.2               # approve (2FA) + GitHub Release
+node scripts/promote-release.mjs --version 0.2.3 --list-only   # review the staged uploads
+node scripts/promote-release.mjs --version 0.2.3               # approve (2FA) + GitHub Release
 ```
 
 This keeps a partial failure safe: nothing is public until every package is approved, and a failed
