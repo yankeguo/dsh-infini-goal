@@ -344,6 +344,17 @@ npm view @yankeguo/dsh-client-ui-infini-goal version
 gh release view v0.2.1
 ```
 
+三处必须一致：`package.json` 与 tag 的版本、每个包的 `npm view` 版本与 `dist-tags`、
+`gh release view` 的内容。若包已公开但 GitHub Release 缺失（approve 时用了
+`--no-github-release`，或 `gh` 那一步失败），从**已存在的 tag** 补建，tag 不移动、不重建：
+
+```sh
+gh release create v0.2.1 --verify-tag --title v0.2.1 --notes-file docs/releases/v0.2.1.md
+```
+
+`--verify-tag` 在 tag 不存在时直接失败；省略它时 `gh` 会从默认分支 HEAD 新建一个 tag，
+把发布记录绑到错误的提交上。
+
 在 DSH 中安装验证：
 
 ```sh
