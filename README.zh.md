@@ -91,7 +91,7 @@ protocol/core 实例——其余依赖（例如 core 内联的 `zod`）打进产
 
 | 项 | 要求 |
 | --- | --- |
-| DSH | `0.2.2-rc.1` – `0.2.2-rc.4`（声明范围 `>=0.2.2-rc.1 <0.3.0`；每个 rc 均已验证，见 [DSH 兼容性](docs/COMPATIBILITY.md)） |
+| DSH | `0.2.2-rc.1` – `0.2.2-rc.5`（声明范围 `>=0.2.2-rc.1 <0.3.0`；每个 rc 均已验证，见 [DSH 兼容性](docs/COMPATIBILITY.md)） |
 | Node.js | ≥ 24.9（仅本地构建 / 发布 / E2E 需要；从 npm 安装插件不需要本机 Node） |
 | pnpm | 12.x（CI 固定 `pnpm@12.16.1`） |
 | Web UI | DSH 桌面端或 `dsh web`；状态条只在 Web 端渲染 |
@@ -151,7 +151,7 @@ pnpm install:profile                  # 先 pnpm build，再重新链接即生�
 pnpm uninstall:profile                # 移除链接与 bundle 选择
 ```
 
-支持的 0.2.2 版本线覆盖 `0.2.2-rc.1` 到 `0.2.2-rc.4`：rc.2 / rc.3 / rc.4 的插件 API 变化由探测式
+支持的 0.2.2 版本线覆盖 `0.2.2-rc.1` 到 `0.2.2-rc.5`：rc.2 / rc.3 / rc.4 / rc.5 的插件 API 变化由探测式
 兼容层处理（见 [DSH 兼容性](docs/COMPATIBILITY.md)）。升级 DSH 大版本（0.3）前需要更新插件 /
 bundle 包的 `engines.dsh` 并回归；不兼容的 bundle 会被 DSH 跳过。
 
@@ -349,7 +349,7 @@ Host 命令侧 pause / complete / block / clear 只 abort 正在运行的自动�
 - **倒计时是本地计算**：状态条按 projection 与本地每秒计算节奏行，允许秒级显示偏差；
   实际是否触发由驱动器用同一份 `planTrigger` 计算。
 - **兼容性**：插件 / bundle 包声明 `engines.dsh: >=0.2.2-rc.1 <0.3.0`；已在 `0.2.2-rc.1`、
-  `0.2.2-rc.2`、`0.2.2-rc.3`、`0.2.2-rc.4` 验证，rc.2+ 的 API 变化由探测式兼容层处理（见
+  `0.2.2-rc.2`、`0.2.2-rc.3`、`0.2.2-rc.4`、`0.2.2-rc.5` 验证，rc.2+ 的 API 变化由探测式兼容层处理（见
   [DSH 兼容性](docs/COMPATIBILITY.md)）；DSH 升级到 0.3 前需要更新插件。
 - **单 Session 语义**：目标与轮次属于当前 Session；本插件不提供跨 Session 共享或汇总目标。
 

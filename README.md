@@ -98,7 +98,7 @@ runtime asset and is not transpiled.
 
 | Item | Requirement |
 | --- | --- |
-| DSH | `0.2.2-rc.1` – `0.2.2-rc.4` (declared range `>=0.2.2-rc.1 <0.3.0`; every rc verified — see [DSH compatibility](docs/COMPATIBILITY.md)) |
+| DSH | `0.2.2-rc.1` – `0.2.2-rc.5` (declared range `>=0.2.2-rc.1 <0.3.0`; every rc verified — see [DSH compatibility](docs/COMPATIBILITY.md)) |
 | Node.js | ≥ 24.9 (only needed for local build / publish / E2E; installing the plugin from npm does not need Node on this machine) |
 | pnpm | 12.x (CI pins `pnpm@12.16.1`) |
 | Web UI | DSH desktop app or `dsh web`; the status bar only renders in the Web UI |
@@ -163,7 +163,7 @@ pnpm install:profile                  # run pnpm build first; re-linking applies
 pnpm uninstall:profile                # remove the links and bundle selection
 ```
 
-The supported 0.2.2 line runs from `0.2.2-rc.1` through `0.2.2-rc.4`: the rc.2/rc.3/rc.4 plugin-API
+The supported 0.2.2 line runs from `0.2.2-rc.1` through `0.2.2-rc.5`: the rc.2/rc.3/rc.4/rc.5 plugin-API
 changes are handled by feature-detected shims (see [DSH compatibility](docs/COMPATIBILITY.md)).
 Before upgrading DSH across a major version (0.3), update the plugins' / bundles' `engines.dsh` and
 regression-test; incompatible bundles are skipped by DSH.
@@ -386,7 +386,7 @@ own automatic round.
   and local per-second computation, so second-level display drift is possible; the actual trigger is
   computed by the driver with the same `planTrigger`.
 - **Compatibility**: plugin / bundle packages declare `engines.dsh: >=0.2.2-rc.1 <0.3.0`; verified on
-  `0.2.2-rc.1`, `0.2.2-rc.2`, `0.2.2-rc.3`, and `0.2.2-rc.4` (the rc.2+ API changes are handled by
+  `0.2.2-rc.1`, `0.2.2-rc.2`, `0.2.2-rc.3`, `0.2.2-rc.4`, and `0.2.2-rc.5` (the rc.2+ API changes are handled by
   feature-detected shims — see [DSH compatibility](docs/COMPATIBILITY.md)). The plugins must be
   updated before DSH moves to 0.3.
 - **Single-session semantics**: goals and rounds belong to the current Session; the plugin offers no

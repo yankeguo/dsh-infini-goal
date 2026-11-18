@@ -4,7 +4,7 @@
 # Proves, against the installed DSH 0.2.2-rc.1 runtime and without any real
 # model API token:
 #
-#   1. an isolated DSH_HOME under /tmp boots the shipped `web` composition on a
+#   1. an isolated DSH_HOME under DSH_E2E_ROOT boots the shipped `web` composition on a
 #      port >= 34000 and prints its tokenized readiness URL,
 #   2. a plugin inserted by ABSOLUTE FILESYSTEM PATH mounts in the Host
 #      (GET /e2e-trivial/health) and in the Browser
@@ -48,7 +48,7 @@ trap cleanup EXIT
 step "bootstrap fresh isolated harness"
 "${E2E_DIR}/bootstrap.sh" --fresh
 mkdir -p "${SMOKE_DIR}"
-[[ "${DSH_HOME}" == /tmp/* ]] || fail "DSH_HOME must stay under /tmp, got ${DSH_HOME}"
+e2e_safe_fresh_root "${DSH_E2E_ROOT}" || fail "DSH_E2E_ROOT must live under an allowed test prefix, got ${DSH_E2E_ROOT}"
 [[ -f "${DSH_HOME}/profiles/${DSH_E2E_PROFILE}/cordis.patch.yml" ]] || fail "custom profile was not created"
 echo "PASS isolated home=${DSH_HOME} profile=${DSH_E2E_PROFILE}"
 

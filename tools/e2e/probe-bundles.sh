@@ -19,7 +19,7 @@
 # so the preset filters mount exactly once. Distinct ids would register two
 # agent presets with the same preset id and log "Duplicate agent preset".
 #
-# Two phases against a fresh isolated DSH_HOME under ${DSH_E2E_ROOT} (/tmp):
+# Two phases against a fresh isolated DSH_HOME under ${DSH_E2E_ROOT} (an allowed scratch root):
 #
 #   Phase A — main bundle only (the new default):
 #     A1 `bootstrap.sh --fresh`

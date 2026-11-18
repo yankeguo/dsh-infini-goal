@@ -9,7 +9,7 @@
 # ${DSH_E2E_ROOT} and every process is spawned/killed by the harness itself.
 #
 # Environment defaults (all overridable):
-#   DSH_E2E_ROOT      /tmp/dsh-e2e   scratch root (isolated DSH_HOME etc.)
+#   DSH_E2E_ROOT      /tmp/dsh-e2e   scratch root (isolated DSH_HOME etc.; cache-dir roots supported)
 #   DSH_E2E_HOME      $DSH_E2E_ROOT/home        (derived; isolated DSH_HOME)
 #   DSH_E2E_PROFILE   e2e            custom profile name under $DSH_HOME/profiles
 #   DSH_E2E_WEB_PORT  34000          Web port (must be >= 34000)
@@ -34,6 +34,7 @@
 #   e2e_wait_http <url> <secs>
 #   e2e_wait_log_line <file> <pattern> <secs> <label>
 #   e2e_stop_pid <web|llm>  SIGTERM the recorded PID, SIGKILL after 15 s
+#   e2e_safe_fresh_root <p> true when a scratch root may be deleted with --fresh
 #
 # shellcheck shell=bash
 
@@ -118,6 +119,24 @@ e2e_require_file() {
   if [[ ! -f "${path}" ]]; then
     e2e_usage_error "required file not found: ${path}"
   fi
+}
+
+# True when one scratch root is safe to delete with --fresh.
+#
+# `--fresh` removes a tree recursively. Keep the allowlist deliberately narrow:
+# the conventional /tmp scratch area, or an explicitly named test directory
+# under the user's cache directory (where this harness can run without tmpfs
+# pressure). The root itself must be a child, not the cache prefix.
+# @param root scratch root to classify
+# @returns 0 when the root is an allowed child path
+e2e_safe_fresh_root() {
+  local root="${1:?e2e_safe_fresh_root: root required}"
+  case "${root}" in
+    /tmp/?*) return 0 ;;
+    "${HOME}"/Library/Caches/dsh-plugin-tests/?*) return 0 ;;
+    "${HOME}"/.cache/dsh-plugin-tests/?*) return 0 ;;
+  esac
+  return 1
 }
 
 # True when nothing is listening on ${DSH_E2E_HOST}:<port>. Uses bash's /dev/tcp

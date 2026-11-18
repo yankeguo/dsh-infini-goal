@@ -89,7 +89,7 @@ dsh web --patch .tmp/cordis.patch.yml --port 34000 --no-open
 
 ### 前置条件
 
-- DSH `0.2.2-rc.1` – `0.2.2-rc.4`（bundle 声明 `engines.dsh: >=0.2.2-rc.1 <0.3.0`；每个 rc 均已
+- DSH `0.2.2-rc.1` – `0.2.2-rc.5`（bundle 声明 `engines.dsh: >=0.2.2-rc.1 <0.3.0`；每个 rc 均已
   验证，见仓库 `docs/COMPATIBILITY.md`）；
 - 从 npm 安装不需要本机 Node；本地构建 / 发布需要 Node.js ≥ 24.9 与 pnpm 12。
 
@@ -155,7 +155,7 @@ bundle 里的 `infini-goal-tool` 行没有显式写 `blockedAfterConsecutiveRoun
 - 权限：创建 / 编辑 / resume / 节奏配置需要 direct human 授权；`pause` / `complete` / `blocked`
   额外允许当前自动轮次授权（自动轮次中 block 还要求达到 `blockedAfterConsecutiveRounds`）。
   定时任务提示、subagent / agent-team / 其他 agent 消息和运行期通知永不授权。
-- 兼容性：`engines.dsh: >=0.2.2-rc.1 <0.3.0`，已在 0.2.2-rc.1 / 0.2.2-rc.2 / 0.2.2-rc.3 / 0.2.2-rc.4 验证；rc.2+
+- 兼容性：`engines.dsh: >=0.2.2-rc.1 <0.3.0`，已在 0.2.2-rc.1 / 0.2.2-rc.2 / 0.2.2-rc.3 / 0.2.2-rc.4 / 0.2.2-rc.5 验证；rc.2+
   的 API 变化由探测式兼容层处理（见仓库 `docs/COMPATIBILITY.md`）；本地构建 / 发布需要
   Node.js ≥ 24.9、pnpm 12。
 

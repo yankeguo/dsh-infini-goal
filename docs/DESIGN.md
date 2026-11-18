@@ -455,10 +455,12 @@ bundle 的 `package.json` 声明 `dsh.bundle.patch` 与 `dsh.bundle.listedByDefa
   `waitForTreeWork()`，并让 projection schema 绑定 `zod@4.6.6`；兼容层与验证矩阵见
   [DSH 兼容性](COMPATIBILITY.md)。
 
-### 11.2 DSH 0.2.2-rc.1 – rc.4 兼容矩阵（2026-11-18）
+### 11.2 DSH 0.2.2-rc.1 – rc.5 兼容矩阵（2026-11-19）
 
-- 用 npm 独立安装 `@deepseek-ai/dsh@0.2.2-rc.{1,2,3,4}` 到 `/tmp` 隔离前缀；每个版本均以
+- 用 npm 独立安装 `@deepseek-ai/dsh@0.2.2-rc.{1,2,3,4,5}` 到隔离前缀；每个版本均以
   独立 `DSH_HOME` / profile / 端口运行真实 harness，不触碰安装版 desktop app 与用户 `~/.dsh`。
+  rc.5 使用 `~/Library/Caches/dsh-plugin-tests/dsh-infini-goal/rc5`，并把 `TMPDIR` 指向该目录，
+  避免 tmpfs / 默认临时目录压力。
 - 每个版本的四项实测：
   `suite.sh --fresh` → 9/9 steps；`probe-tools.sh` → 14/14（工具注册、system prompt、
   `create_infini_goal`、`update_infini_goal`）；`probe-install.sh` → 26/26；
@@ -467,8 +469,9 @@ bundle 的 `package.json` 声明 `dsh.bundle.patch` 与 `dsh.bundle.listedByDefa
   9 个产物。
 - 关键差异与处理：rc.1 `roots()` / rc.2+ header `origin`+`delegationDepth` 已由
   `isRuntimeRoot` 双分支覆盖；rc.1 `waitForChildren()` / rc.2+ `waitForTreeWork()` 已由
-  `waitForSubagentWork` 探测；rc.4 仅在 `dsh-llm` 新增 `CONTENT_REFUSED`，无删除/改名。
-  详见 [DSH 兼容性](COMPATIBILITY.md)。
+  `waitForSubagentWork` 探测；rc.4 仅在 `dsh-llm` 新增 `CONTENT_REFUSED`，无删除/改名；
+  rc.5 的变更集中在 web search 路由（`dsh-tool-web` / `dsh-web-search-deepseek`），
+  本套件不 import 这些包，goal/driver 链路实测不受影响。详见 [DSH 兼容性](COMPATIBILITY.md)。
 
 ## 12. 实现记录与偏差
 

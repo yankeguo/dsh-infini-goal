@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prepare the isolated E2E harness: a throwaway DSH_HOME under /tmp, a custom
+# Prepare the isolated E2E harness: a throwaway DSH_HOME under DSH_E2E_ROOT, a custom
 # `e2e` profile cloned from the shipped `web` template, and the generated
 # patch overlays (mock LLM provider + trivial fixture plugin).
 #
@@ -10,7 +10,9 @@
 # Usage:
 #   tools/e2e/bootstrap.sh [--fresh]
 #
-#   --fresh   delete ${DSH_E2E_ROOT} first (refused unless the path is /tmp/...)
+#   --fresh   delete ${DSH_E2E_ROOT} first (refused outside the narrow safe-root
+#             allowlist: /tmp/*, ~/Library/Caches/dsh-plugin-tests/*,
+#             ~/.cache/dsh-plugin-tests/*)
 #
 # Environment: see lib/common.sh.
 set -euo pipefail
@@ -31,11 +33,12 @@ e2e_assert_ports
 e2e_require_launcher
 
 if (( FRESH )); then
-  # Safety: only ever remove a scratch root inside /tmp, never a real home.
-  case "${DSH_E2E_ROOT}" in
-    /tmp/*) ;;
-    *) echo "e2e bootstrap: refusing --fresh for DSH_E2E_ROOT=${DSH_E2E_ROOT} (must live under /tmp)" >&2; exit 2 ;;
-  esac
+  # Safety: only ever remove a scratch child under an allowed test prefix.
+  if ! e2e_safe_fresh_root "${DSH_E2E_ROOT}"; then
+    echo "e2e bootstrap: refusing --fresh for DSH_E2E_ROOT=${DSH_E2E_ROOT}" >&2
+    echo "e2e bootstrap: allowed prefixes: /tmp/, ${HOME}/Library/Caches/dsh-plugin-tests/, ${HOME}/.cache/dsh-plugin-tests/" >&2
+    exit 2
+  fi
   rm -rf "${DSH_E2E_ROOT}"
 fi
 

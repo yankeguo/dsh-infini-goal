@@ -3,7 +3,7 @@
 Reproducible, isolated end-to-end verification of this repo's DSH plugin suite
 against the **installed** DeepSeek Harness desktop runtime or an isolated
 npm-installed release — verified on **0.2.2-rc.1**, **0.2.2-rc.2**,
-**0.2.2-rc.3**, and **0.2.2-rc.4** — with a deterministic mock LLM (no real API
+**0.2.2-rc.3**, **0.2.2-rc.4**, and **0.2.2-rc.5** — with a deterministic mock LLM (no real API
 tokens) and no interference with the user's live Harness app or `~/.dsh` home.
 
 Everything lives under `tools/e2e/`. Every process the harness starts is spawned
@@ -43,13 +43,27 @@ tools/e2e/
 
 | Requirement | Notes |
 |---|---|
-| DeepSeek Harness **0.2.2-rc.1** – **0.2.2-rc.4** | default launcher is the desktop app `/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh`; override `DSH_BIN` to test an npm-installed release |
+| DeepSeek Harness **0.2.2-rc.1** – **0.2.2-rc.5** | default launcher is the desktop app `/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh`; override `DSH_BIN` to test an npm-installed release |
 | Node.js **>= 24.9** on `PATH` | matches the repo `engines.node` (esbuild `target: node24`, SDK scripts); override with `DSH_E2E_NODE` |
 | `pnpm` + repo `node_modules` | `pnpm install` once; `suite.sh`/`probe-tools.sh` need `pnpm build` |
 | free TCP ports **>= 34000** | `DSH_E2E_WEB_PORT` (34000) and `DSH_E2E_LLM_PORT` (34100) |
-| no writes to `~/.dsh` | everything lives under `/tmp/dsh-e2e` (or `DSH_E2E_ROOT`) |
+| no writes to `~/.dsh` | everything lives under `DSH_E2E_ROOT` (default `/tmp/dsh-e2e`; cache-directory roots are supported) |
 
-All scratch state goes to **`/tmp/dsh-e2e/`** by default:
+All scratch state goes to **`/tmp/dsh-e2e/`** by default. For hosts where
+tmpfs pressure is a concern, point `DSH_E2E_ROOT` at a child of
+`~/Library/Caches/dsh-plugin-tests/` or `~/.cache/dsh-plugin-tests/` and set
+`TMPDIR` inside the same tree; `bootstrap.sh --fresh` allows exactly those
+prefixes (plus `/tmp/`). Example:
+
+```sh
+CACHE="$HOME/Library/Caches/dsh-plugin-tests/dsh-infini-goal/rc5"
+mkdir -p "$CACHE/tmp" "$CACHE/e2e/suite"
+TMPDIR="$CACHE/tmp" DSH_E2E_ROOT="$CACHE/e2e/suite" \
+  DSH_BIN="$CACHE/install/node_modules/.bin/dsh" \
+  tools/e2e/suite.sh --fresh
+```
+
+Default layout:
 
 | Path | Contents |
 |---|---|
@@ -122,7 +136,7 @@ Environment overrides (all optional):
 | Variable | Default | Meaning |
 |---|---|---|
 | `DSH_BIN` | packaged launcher under `/Applications/DeepSeek Harness.app` | CLI to boot |
-| `DSH_E2E_ROOT` | `/tmp/dsh-e2e` | scratch root (never `~/.dsh`) |
+| `DSH_E2E_ROOT` | `/tmp/dsh-e2e` | scratch root (never `~/.dsh`); `--fresh` accepts `/tmp/*` or children of `~/Library/Caches/dsh-plugin-tests/` / `~/.cache/dsh-plugin-tests/` |
 | `DSH_E2E_PROFILE` | `e2e` | custom profile name under `$DSH_HOME/profiles` |
 | `DSH_E2E_WEB_PORT` | `34000` | Web port (must be `>= 34000`) |
 | `DSH_E2E_LLM_PORT` | `34100` | mock LLM port (must be `>= 34000`) |
@@ -183,7 +197,7 @@ Ports below 34000 are refused outright.
 
 ---
 
-## Discovered facts (DSH 0.2.2-rc.1, re-verified on rc.2, rc.3, rc.4)
+## Discovered facts (DSH 0.2.2-rc.1, re-verified on rc.2, rc.3, rc.4, rc.5)
 
 ### Version matrix (2026-11-18)
 
@@ -191,7 +205,9 @@ Each npm-installed release was run with its own `DSH_HOME`, profile, and port
 pair. `suite.sh --fresh` passed 9/9 steps, `probe-tools.sh` 14/14 checks
 (tool registration, system prompt, `create_infini_goal`, `update_infini_goal`),
 `probe-install.sh` 26/26, and `probe-bundles.sh` 61/61 on **rc.1, rc.2, rc.3,
-and rc.4**. See `docs/COMPATIBILITY.md` for the exact commands and shims.
+rc.4, and rc.5**. The rc.5 run used a cache-directory root with `TMPDIR`
+redirected into it. See `docs/COMPATIBILITY.md` for the exact commands and
+shims.
 
 ### What moved in DSH 0.2.2-rc.3
 
@@ -209,7 +225,7 @@ suite moved, and both have feature-detected shims in the plugin:
 - The `ProjectionDefinition` schema types are now bound to `zod@4.6.6`; the
   repo's SDK devDependencies and the core plugin's `zod` peer follow it.
 
-Evidence on rc.1–rc.4: `suite.sh --fresh` (pacing / quiet window / pause),
+Evidence on rc.1–rc.5: `suite.sh --fresh` (pacing / quiet window / pause),
 `probe-tools.sh` (scripted `create_infini_goal` + `update_infini_goal`, system
 prompt policy), `probe-install.sh` (real install path, commands, tools,
 automatic round), and `probe-bundles.sh` (61 checks) all PASS on every release.
