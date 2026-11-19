@@ -34,7 +34,7 @@ Docs: [Design](docs/DESIGN.md) · [Publishing guide](docs/PUBLISHING.md) ·
 | Model tools | `get_infini_goal` / `create_infini_goal` / `update_infini_goal` |
 | Human command | `/infini-goal` — inspect status, configure pacing, pause/resume without spending model rounds |
 | Status-bar UI | InfiniGoalBar above the composer: phase, rounds, trigger pacing, quiet-window hint, pause/resume/clear |
-| Permission model | Every change needs human authorization, or the current automatic round's authorization for pause/complete/block; the model cannot rewrite the goal on its own (see [Permission model](#permission-model)) |
+| Permission model | Every change needs human or delegated DevLead-relay authorization, or the current automatic round's authorization for pause/complete/block; the model cannot rewrite the goal on its own (see [Permission model](#permission-model)) |
 | Coexistence | Tool, command, and status-bar names do not collide with the official `dsh-goal`; installing the bundle also switches the official goal off by default |
 
 ## UI
@@ -215,7 +215,8 @@ completed `pnpm install`; you can also repair only the given logs with
 ```
 
 You can also let the model create a goal: when a human request is a long-running objective, the
-model calls `create_infini_goal` (this requires a direct human message in the current round). After
+model calls `create_infini_goal` (this requires a direct human message or a shape-valid DevLead
+relay prompt in the current round). After
 a goal is `complete`, running `/infini-goal edit <new objective>` creates a new goal instead of
 modifying the completed one. Command arguments support paired quotes (e.g. the quotes around
 `"Mo-Fr 09:00-18:00"` in `/infini-goal quiet "Mo-Fr 09:00-18:00"` are stripped and never become part
@@ -271,7 +272,7 @@ id — note that DSH patches replace the row's config wholesale).
 
 | Key | Default | Notes |
 | --- | --- | --- |
-| `blockedAfterConsecutiveRounds` | `3` | positive integer; applies only under "current automatic round" authorization, a direct human block is not limited by it (see [Permission model](#permission-model)) |
+| `blockedAfterConsecutiveRounds` | `3` | positive integer; applies only under "current automatic round" authorization, a human-authority block (direct human or DevLead relay) is not limited by it (see [Permission model](#permission-model)) |
 
 The bundle's tool row does not set this option explicitly, which is equivalent to the default `3`.
 
@@ -345,25 +346,34 @@ create or rewrite a goal on its own judgment:
 - **Humans**: `/infini-goal ...` commands can create, edit, pause, resume, complete, block, and clear
   goals, as well as configure pacing via `interval` / `quiet` / `timezone`.
 - **Model tools**:
-  - `create_infini_goal` requires a **direct human message** from the runtime root agent in the
-    current turn;
-  - `edit`, `config`, and `resume` on `update_infini_goal` likewise require a direct human message;
+  - `create_infini_goal` requires a **direct human message** or a **shape-valid DevLead relay
+    prompt** from the runtime root agent in the current turn;
+  - `edit`, `config`, and `resume` on `update_infini_goal` likewise require a direct human message
+    or a shape-valid DevLead relay prompt;
+  - a DevLead relay prompt is a `user/message` whose source is exactly
+    `{ kind: 'devlead', form: 'relay', senderSessionId: <non-blank string> }`. DevLead `notice`
+    messages, other forms, missing or ill-typed sender ids, and unknown source shapes fail closed.
+    This is a soft protocol contract with the separately installed DevLead plugin: it is checked
+    structurally and adds no package dependency;
   - `pause`, `complete`, and `blocked` are additionally allowed under "the current goal's automatic
     round" authorization. Pause only stops autonomy, so the goal's own round may use it without a
     human; it does not create or rewrite the goal;
   - reporting `blocked` in an automatic round also requires `blockedAfterConsecutiveRounds`
-    (default 3) to be reached;
-  - scheduled prompts, subagent messages, agent-team messages, other agent messages, and runtime
-    notices never authorize a goal change, because the calling side can create them;
+    (default 3) to be reached; direct human or DevLead relay authority may block immediately;
+  - DevLead notices, scheduled prompts, subagent messages, agent-team messages, other agent
+    messages, and runtime notices never authorize a goal change, because the calling side can
+    create them;
   - authorization is determined from Session events (the `user/message` source inside the open turn,
     root-agent identity), not from the model's self-report.
 
-A turn opened by another agent, a scheduled task, or a runtime notice contains no direct human
-message. Such a Session therefore cannot create/edit/config/resume a goal even when the visible text
-reads like a user request. This is deliberate: those sources can be produced by the calling side, so
-trusting them would turn a non-human message into goal authority. The legal paths are a direct human
-message in the Session, the `/infini-goal ...` command, or — for pause/complete/blocked — the goal's
-own automatic round.
+A turn opened by another agent, a scheduled task, a DevLead notice, or a runtime notice contains no
+human authority message. Such a Session therefore cannot create/edit/config/resume a goal even when
+the visible text reads like a user request. This is deliberate: those sources can be produced by the
+calling side, so trusting them would turn a non-human message into goal authority. The legal paths
+are a direct human message in the Session, a shape-valid DevLead relay prompt, the
+`/infini-goal ...` command, or — for pause/complete/blocked — the goal's own automatic round. The
+DevLead relay exception is intentionally narrow: it covers only the exact relay shape above on the
+runtime root, never DevLead notices or other plugin sources.
 
 - **UI**: status-bar buttons only submit `/infini-goal ...` commands; there is no independent Remote
   API or higher privilege.

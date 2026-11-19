@@ -260,7 +260,8 @@ Round prompt（模型可见）：`<infini_goal_round>` 块，包含 objective、
   `nextTriggerInMs = delayMs`；`quietUntil` 只在静默延后触发时非 `null`（且等于
   `nextTriggerAt`），因此模型能区分“等最小间隔”和“等静默结束”。
 - `create_infini_goal`：`objective` 必填；`min_interval`（如 `5m`）、`quiet_windows`
-  （如 `Mo-Fr 09:00-18:00`）、`timezone` 可选。要求 direct human 授权。
+  （如 `Mo-Fr 09:00-18:00`）、`timezone` 可选。要求 human authority（direct human 或合法
+  DevLead relay）授权。
 - 参数解析：`quiet_windows` 为空或仅空白会被拒绝（严格 schema 里 `""` 表示“未提供”，
   要关闭静默时段用 `"none"`）；时长允许 token 间空白（`2h 15m`）但拒绝 `1m s`。
 - `update_infini_goal`：`goal_id`、`revision`、`action`（`edit|pause|resume|complete|blocked|config`），
@@ -268,33 +269,46 @@ Round prompt（模型可见）：`<infini_goal_round>` 块，包含 objective、
 
 | action | 授权 | 语义 |
 | --- | --- | --- |
-| `edit` | direct human | 改 objective 和/或 pacing 字段 |
-| `config` | direct human | 只改 pacing 字段；带 objective 会被拒绝 |
-| `pause` | direct human 或当前 goal round | 生命周期；只停止自主续跑，不增加自主性 |
-| `resume` | direct human | 生命周期；从 paused / blocked 恢复 |
-| `complete` | direct human 或当前 goal round | 从 active / paused / blocked 进入 complete |
-| `blocked` | direct human 或当前 goal round | 从 active 进入 blocked；goal round 授权时要求 `roundsStarted >= blockedAfterConsecutiveRounds`，否则报 `INFINI_GOAL_TOOL_BLOCK_THRESHOLD`；direct human 不受该阈值限制 |
+| `edit` | human authority | 改 objective 和/或 pacing 字段 |
+| `config` | human authority | 只改 pacing 字段；带 objective 会被拒绝 |
+| `pause` | human authority 或当前 goal round | 生命周期；只停止自主续跑，不增加自主性 |
+| `resume` | human authority | 生命周期；从 paused / blocked 恢复 |
+| `complete` | human authority 或当前 goal round | 从 active / paused / blocked 进入 complete |
+| `blocked` | human authority 或当前 goal round | 从 active 进入 blocked；goal round 授权时要求 `roundsStarted >= blockedAfterConsecutiveRounds`，否则报 `INFINI_GOAL_TOOL_BLOCK_THRESHOLD`；human authority 不受该阈值限制 |
 
-- **direct human** 的判定：当前 runtime root agent 的 open turn 内存在 host-attested 的
-  `source.kind === 'user'` 用户消息；同时要求调用方是 `ctx.agents.get()` 返回的同一实例、
-  `agent.status === 'running'`、`ctx.agents.currentInitiator() === agent` 且存在 open model turn。
+- **human authority** 的判定：当前 runtime root agent 的 open turn 内存在以下任一
+  `user/message`：
+  1. **direct human**：host-attested 的 `source.kind === 'user'`；
+  2. **DevLead relay（delegated human）**：source 严格满足 `kind === 'devlead'`、
+     `form === 'relay'`、`senderSessionId` 为非空字符串。
+  DevLead relay 是与独立安装的 DevLead 插件之间的软协议契约：本地字面量 + 结构校验，
+  `packages/tool` 不 import 也不依赖 `@yankeguo/dsh-devlead*`；`form === 'notice'`、其他
+  form、缺失 / 类型错误 / 空 sender id、未知 source 形状全部 fail closed。两种来源都要求
+  调用方是 `ctx.agents.get()` 返回的同一实例、`agent.status === 'running'`、
+  `ctx.agents.currentInitiator() === agent`、存在 open model turn，且调用方是 runtime root；
+  因此落在 subagent 上的 relay 不授权。同一 turn 同时存在时 direct human 优先。
 - **goal round** 的判定：open turn 内存在 `source.kind === 'infini-goal'` 且
   `goalId` / `revision` / `round === roundsStarted` 与当前目标完全匹配的自动轮次消息。
   goal round 授权覆盖 `pause` / `complete` / `blocked`，不覆盖 create / edit / config / resume
   （pause 只降低自主性，因此即使没有人类在场也允许）。
-- 由其他 agent、定时任务或运行期通知开启的 turn 没有 direct human 消息；这类 Session 即使
-  文本看起来像用户请求，也不能 create/edit/config/resume。这是有意的 fail-closed：这些
-  source 可由调用方自行制造，信任它们会把非人类消息变成目标授权。合法路径是直接人类消息、
-  `/infini-goal ...` 命令，或（对 pause/complete/blocked）目标自己的自动轮次。
+- DevLead relay 与 direct human 等价（delegated-human authority）：覆盖 create / edit /
+  config / resume / pause / complete / blocked；blocked 不受 goal-round 阈值限制，也不注入
+  自动轮次的收尾提示。
+- 由其他 agent、定时任务、DevLead notice 或运行期通知开启的 turn 没有 human authority
+  消息；这类 Session 即使文本看起来像用户请求，也不能 create/edit/config/resume。这是有意
+  的 fail-closed：这些 source 可由调用方自行制造，信任它们会把非人类消息变成目标授权。
+  合法路径是直接人类消息、合法 DevLead relay prompt、`/infini-goal ...` 命令，或（对
+  pause/complete/blocked）目标自己的自动轮次。
 - `complete` / `blocked` 在 goal round 授权下会 `exec.deferContext(createUserMessage({ source:
-  {kind:'tool-infini-goal', form:'notice', summary} }))` 注入收尾提示；direct human 授权不注入。
+  {kind:'tool-infini-goal', form:'notice', summary} }))` 注入收尾提示；human authority
+  （direct human 或 delegated-human）授权不注入。
 - 工具错误码（`HarnessError.code`，工具层自有）：
 
   | code | 含义 |
   | --- | --- |
   | `INFINI_GOAL_TOOL_AGENT_REQUIRED` | 工具调用没有 calling agent |
   | `INFINI_GOAL_TOOL_DRIVER_REQUIRED` | 不是精确的 live agent / 非 running / 不是 currentInitiator / 没有 open model turn |
-  | `INFINI_GOAL_TOOL_AUTHORITY_REQUIRED` | 缺少 direct human（create/edit/config/resume）或 direct human 与 goal round 都没有（pause/complete/blocked）；定时任务、subagent / agent-team / 其他 agent 消息、运行期通知永不被接受 |
+  | `INFINI_GOAL_TOOL_AUTHORITY_REQUIRED` | 缺少 human authority（create/edit/config/resume）或 human authority 与 goal round 都没有（pause/complete/blocked）；DevLead notice、定时任务、subagent / agent-team / 其他 agent 消息、运行期通知永不被接受 |
   | `INFINI_GOAL_TOOL_INVALID_ARGUMENT` | objective 为空、时长 / 静默时段 / 时区不可解析或越界、goal_id / revision 非法、edit/config 没有实际变更、config 带 objective、blocked_reason 缺失或为空 |
   | `INFINI_GOAL_TOOL_BLOCK_THRESHOLD` | goal round 授权下 `roundsStarted < blockedAfterConsecutiveRounds` 却要求 blocked |
 
@@ -499,5 +513,5 @@ bundle 的 `package.json` 声明 `dsh.bundle.patch` 与 `dsh.bundle.listedByDefa
   对已 complete 的目标执行 `edit` 会创建新目标。
 - **失败语义**：自动轮次的 block code 全集见 §6（含 `driver-error` / `prompt-rejected`）；
   人类打断 / 取消运行中的自动轮次会 `pause`；Host 命令侧 pause 会 abort 正在运行的自动 turn。
-- **工具阈值**：`blockedAfterConsecutiveRounds` 只在 goal round 授权下生效，direct human 的
-  block 不受阈值限制；工具错误码见 §7。
+- **工具阈值**：`blockedAfterConsecutiveRounds` 只在 goal round 授权下生效，human authority
+  （direct human 或 DevLead relay）的 block 不受阈值限制；工具错误码见 §7。

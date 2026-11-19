@@ -152,9 +152,11 @@ bundle 里的 `infini-goal-tool` 行没有显式写 `blockedAfterConsecutiveRoun
   `get_goal` 等不会出现（需要时可关掉本 bundle 恢复）。
 - 从 0.1.0 升级：0.1.0 写入的旧表示不会被自动迁移；若旧 Session 重启后无法恢复，先退出 DSH，
   再用仓库的 `scripts/repair-session-log.mjs` 修复（见仓库 README「从 0.1.0 升级 / 修复旧会话」）。
-- 权限：创建 / 编辑 / resume / 节奏配置需要 direct human 授权；`pause` / `complete` / `blocked`
-  额外允许当前自动轮次授权（自动轮次中 block 还要求达到 `blockedAfterConsecutiveRounds`）。
-  定时任务提示、subagent / agent-team / 其他 agent 消息和运行期通知永不授权。
+- 权限：创建 / 编辑 / resume / 节奏配置需要 direct human 或合法形状的 DevLead relay prompt
+  （`kind: 'devlead'`、`form: 'relay'`、非空 `senderSessionId`，且落在 runtime root）授权；
+  `pause` / `complete` / `blocked` 额外允许当前自动轮次授权（自动轮次中 block 还要求达到
+  `blockedAfterConsecutiveRounds`）。DevLead notice、定时任务提示、subagent / agent-team /
+  其他 agent 消息和运行期通知永不授权。
 - 兼容性：`engines.dsh: >=0.2.2-rc.1 <0.3.0`，已在 0.2.2-rc.1 / 0.2.2-rc.2 / 0.2.2-rc.3 / 0.2.2-rc.4 / 0.2.2-rc.5 验证；rc.2+
   的 API 变化由探测式兼容层处理（见仓库 `docs/COMPATIBILITY.md`）；本地构建 / 发布需要
   Node.js ≥ 24.9、pnpm 12。

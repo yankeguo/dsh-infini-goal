@@ -31,7 +31,7 @@
 | 模型工具 | `get_infini_goal` / `create_infini_goal` / `update_infini_goal` |
 | 人类命令 | `/infini-goal`，可在不消耗模型轮次的情况下查看状态、配置节奏、暂停/恢复 |
 | 状态条 UI | composer 上方的 InfiniGoalBar：阶段、轮次、触发节奏、静默时段提示、暂停/恢复/清除 |
-| 权限模型 | 所有变更都需要人类授权；pause / complete / block 还可由当前自动轮次授权，模型无法自说自话改目标（见[权限模型](#权限模型)） |
+| 权限模型 | 所有变更都需要人类或 DevLead relay 授权；pause / complete / block 还可由当前自动轮次授权，模型无法自说自话改目标（见[权限模型](#权限模型)） |
 | 可共存 | 与官方 `dsh-goal` 的工具、命令、状态条互不同名；安装本 bundle 会默认关闭官方 goal |
 
 ## 界面
@@ -199,7 +199,8 @@ node scripts/repair-session-log.mjs --write --dsh-home ~/.dsh
 ```
 
 也可以直接让模型创建目标：当人类请求是一个长期目标时，模型会调用 `create_infini_goal`
-（需要当前轮次里有直接的人类消息）。目标 `complete` 之后再执行 `/infini-goal edit <新目标>`
+（需要当前轮次里有直接的人类消息或合法的 DevLead relay prompt）。目标 `complete` 之后再执行
+`/infini-goal edit <新目标>`
 会创建一个新目标，而不是修改已完成的目标。命令参数支持成对引号（如
 `/infini-goal quiet "Mo-Fr 09:00-18:00"` 中的引号会被剥掉一层，不会进入参数值）；
 `interval` / `quiet` / `timezone` 在目标已 `complete` 时会被拒绝，需要先创建新目标。
@@ -252,7 +253,7 @@ node scripts/repair-session-log.mjs --write --dsh-home ~/.dsh
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
-| `blockedAfterConsecutiveRounds` | `3` | 正整数；只在“当前自动轮次”授权下生效，人类直接 block 不受此限（详见[权限模型](#权限模型)） |
+| `blockedAfterConsecutiveRounds` | `3` | 正整数；只在“当前自动轮次”授权下生效，人类或 DevLead relay 的 block 不受此限（详见[权限模型](#权限模型)） |
 
 bundle 里的工具行没有显式写这项配置，等价于使用默认值 `3`。
 
@@ -319,20 +320,29 @@ Host 命令侧 pause / complete / block / clear 只 abort 正在运行的自动�
 - **人类**：`/infini-goal ...` 命令可以执行创建、编辑、暂停、恢复、完成、阻塞、清除，
   以及 `interval` / `quiet` / `timezone` 等节奏配置。
 - **模型工具**：
-  - `create_infini_goal` 需要当前 turn 中存在来自 runtime root agent 的**直接人类消息**；
-  - `update_infini_goal` 的 `edit`、`config`、`resume` 同样需要直接人类消息；
+  - `create_infini_goal` 需要当前 turn 中存在来自 runtime root agent 的**直接人类消息**或
+    **合法形状的 DevLead relay prompt**；
+  - `update_infini_goal` 的 `edit`、`config`、`resume` 同样需要直接人类消息或合法形状的
+    DevLead relay prompt；
+  - DevLead relay prompt 指 source 恰好为
+    `{ kind: 'devlead', form: 'relay', senderSessionId: <非空字符串> }` 的 `user/message`。
+    DevLead `notice`、其他 form、缺失或类型错误的 sender id，以及未知 source 形状一律
+    fail closed。这是与独立安装的 DevLead 插件之间的软协议契约：只做结构校验，不引入包依赖；
   - `pause`、`complete` 与 `blocked` 额外允许“当前目标的自动轮次”本身授权。pause 只停止
     自主续跑，不会创建或改写目标，因此自动轮次可以不经过人类直接 pause；
   - 在自动轮次中报告 `blocked` 时，还要求已达到 `blockedAfterConsecutiveRounds`（默认 3）；
-  - 定时任务提示、subagent 消息、agent-team 消息、其他 agent 消息和运行期通知永不授权
-    目标变更——因为调用方可以自行制造这些消息；
+    直接人类或 DevLead relay 授权不受该阈值限制；
+  - DevLead notice、定时任务提示、subagent 消息、agent-team 消息、其他 agent 消息和运行期
+    通知永不授权目标变更——因为调用方可以自行制造这些消息；
   - 授权判定基于 Session 事件（open turn 内的 `user/message` source、root agent 身份），
     不采信模型的自我声明。
 
-由其他 agent、定时任务或运行期通知开启的 turn 不包含直接人类消息。这样的 Session 即使可见
-文本看起来像用户请求，也不能 create/edit/config/resume 目标。这是有意的：这些 source 可以由
-调用方自行制造，信任它们等于把非人类消息变成目标授权。合法路径是 Session 内的直接人类消息、
-`/infini-goal ...` 命令，或（对 pause/complete/blocked）目标自己的自动轮次。
+由其他 agent、定时任务、DevLead notice 或运行期通知开启的 turn 不包含人类授权消息。这样的
+Session 即使可见文本看起来像用户请求，也不能 create/edit/config/resume 目标。这是有意的：
+这些 source 可以由调用方自行制造，信任它们等于把非人类消息变成目标授权。合法路径是 Session
+内的直接人类消息、合法形状的 DevLead relay prompt、`/infini-goal ...` 命令，或（对
+pause/complete/blocked）目标自己的自动轮次。DevLead relay 例外刻意保持狭窄：只接受上述精确
+形状且必须落在 runtime root 上，绝不扩展到 DevLead notice 或其他插件 source。
 
 - **UI**：状态条按钮只是提交 `/infini-goal ...` 命令，没有独立 Remote API 或更高权限。
 - **安全边界**：插件运行在 Host 进程内，安装第三方插件等同于信任其代码；本套件不改变 DSH

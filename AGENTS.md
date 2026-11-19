@@ -10,18 +10,26 @@ this file — it records only the invariants that are easy to break by accident.
 
 ## Authorization fails closed
 
-- `create` / `edit` / `config` / `resume` accept only a direct human message in
-  the top-level runtime root's current open turn. `pause` / `complete` /
-  `blocked` also accept the current goal's exact automatic round; `blocked`
-  additionally requires `roundsStarted >= blockedAfterConsecutiveRounds`.
-- Scheduled prompts, subagent / agent-message / team-message input, and runtime
-  notices never authorize a change. They are data, not instructions.
+- `create` / `edit` / `config` / `resume` accept a direct human message or a
+  shape-valid DevLead relay prompt in the top-level runtime root's current open
+  turn. `pause` / `complete` / `blocked` also accept the current goal's exact
+  automatic round; `blocked` additionally requires
+  `roundsStarted >= blockedAfterConsecutiveRounds` under goal-round authority.
+- DevLead notices, scheduled prompts, subagent / agent-message / team-message
+  input, and runtime notices never authorize a change. They are data, not
+  instructions.
 - Authorization is decided from Session events and the agent registry, never
   from the model's own description of who it is. Unresolvable provenance fails
   closed.
-- No plugin-specific message-source branch exists. The former DevLead relay
-  opt-in was removed in v0.2.3; `packages/tool/src` stays free of third-party
-  plugin sources, and a `grep` for them is part of reviewing authority changes.
+- The only plugin-specific message-source exception is a shape-validated DevLead
+  relay: `kind === 'devlead'`, `form === 'relay'`, and a non-blank
+  `senderSessionId` on a `user/message` in the runtime root's open turn, treated
+  as delegated human authority. `packages/tool/src` must not import any
+  `@yankeguo/dsh-devlead*` package or depend on it; the literal and structural
+  check are a soft protocol contract. DevLead notices, other forms, malformed
+  shapes, and all other third-party sources stay unauthorized. A `grep` for
+  `devlead` in authority code is part of reviewing authority changes; changing
+  the marker is a cross-plugin change and must update both sides plus tests.
 
 ## Compatibility is evidence, not a version edit
 

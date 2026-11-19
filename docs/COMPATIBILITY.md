@@ -62,7 +62,8 @@ both the main-bundle-only install and the legacy-companion upgrade path.
 ### `AgentRegistry.roots()` was removed (0.2.2-rc.2)
 
 The model tools authorize `create_infini_goal` and mutating
-`update_infini_goal` calls by "direct human input on a runtime root agent".
+`update_infini_goal` calls by human authority on a runtime root agent: a direct
+human message or a shape-validated DevLead relay prompt.
 DSH 0.2.2-rc.1 exposed `ctx.agents.roots()` for that check. rc.2 removed it, so
 on rc.3 every authorized call failed with:
 
