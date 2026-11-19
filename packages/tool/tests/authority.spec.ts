@@ -7,15 +7,18 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { InfiniGoalView } from '@yankeguo/dsh-infini-goal-protocol'
 import {
   completionAuthority,
+  devLeadRelaySourceOf,
   infiniGoalToolExecution,
   infiniGoalRoundSourceOf,
   isDirectHumanSource,
+  isHumanAuthoritySource,
   isMatchingInfiniGoalRoundSource,
   isRuntimeRoot,
   openTurnHasDirectHumanInput,
+  openTurnHasHumanAuthority,
   openTurnHasInfiniGoalRound,
   pauseAuthority,
-  requireDirectHuman,
+  requireHumanAuthority,
 } from '../src/authority.ts'
 import type { InfiniGoalToolExecution } from '../src/authority.ts'
 
@@ -59,6 +62,24 @@ const SUBAGENT_SETTLED_SOURCE = {
   form: 'notice',
   summary: 'a subagent settled',
   senderSessionId: 'child-session',
+}
+
+/** One shape-valid DevLead relay prompt source. */
+const DEVLEAD_RELAY_SOURCE = {
+  kind: 'devlead',
+  form: 'relay',
+  senderSessionId: 'lead-session',
+}
+
+/** One DevLead notice source (never authority). */
+const DEVLEAD_NOTICE_SOURCE = { kind: 'devlead', form: 'notice' }
+
+/** One generic runtime notice source (never authority). */
+const RUNTIME_NOTICE_SOURCE = { kind: 'runtime-notice', form: 'notice', summary: 'runtime notice' }
+
+/** Cast an arbitrary fixture into the MessageSource parameter surface. */
+function messageSource(value: unknown): Parameters<typeof isHumanAuthoritySource>[0] {
+  return value as Parameters<typeof isHumanAuthoritySource>[0]
 }
 
 /** Build one fake user-message event carrying the supplied source. */
@@ -121,6 +142,55 @@ describe('isDirectHumanSource', () => {
     expect(isDirectHumanSource({ kind: 'model', provider: 'p', model: 'm' })).toBe(false)
     expect(isDirectHumanSource(ROUND_SOURCE as unknown as Parameters<typeof isDirectHumanSource>[0]))
       .toBe(false)
+    expect(isDirectHumanSource(messageSource(DEVLEAD_RELAY_SOURCE))).toBe(false)
+  })
+})
+
+describe('devLeadRelaySourceOf', () => {
+  it('narrows only the exact relay prompt shape', () => {
+    expect(devLeadRelaySourceOf(messageSource(DEVLEAD_RELAY_SOURCE))).toEqual(DEVLEAD_RELAY_SOURCE)
+  })
+
+  it('fails closed for notices, other forms, missing sender ids, and malformed shapes', () => {
+    const malformed = [
+      DEVLEAD_NOTICE_SOURCE,
+      { kind: 'devlead', form: 'notice', senderSessionId: 'lead-session' },
+      { kind: 'devlead', form: 'relay' },
+      { kind: 'devlead', form: 'relay', senderSessionId: undefined },
+      { kind: 'devlead', form: 'relay', senderSessionId: 42 },
+      { kind: 'devlead', form: 'relay', senderSessionId: '' },
+      { kind: 'devlead', form: 'relay', senderSessionId: '   ' },
+      { kind: 'devlead', form: 'Relay', senderSessionId: 'lead-session' },
+      { kind: 'devlead-relay', form: 'relay', senderSessionId: 'lead-session' },
+      { kind: 'agent-message', form: 'relay', senderSessionId: 'lead-session' },
+      { form: 'relay', senderSessionId: 'lead-session' },
+      {},
+      null,
+    ]
+    for (const source of malformed) {
+      expect(devLeadRelaySourceOf(messageSource(source))).toBeUndefined()
+    }
+  })
+})
+
+describe('isHumanAuthoritySource', () => {
+  it('accepts direct human input and shape-valid DevLead relay prompts only', () => {
+    expect(isHumanAuthoritySource({ kind: 'user' })).toBe(true)
+    expect(isHumanAuthoritySource(messageSource(DEVLEAD_RELAY_SOURCE))).toBe(true)
+    for (const source of [
+      DEVLEAD_NOTICE_SOURCE,
+      { kind: 'devlead', form: 'relay' },
+      { kind: 'devlead', form: 'relay', senderSessionId: '' },
+      { kind: 'schedule' },
+      AGENT_MESSAGE_SOURCE,
+      TEAM_MESSAGE_SOURCE,
+      SUBAGENT_SETTLED_SOURCE,
+      RUNTIME_NOTICE_SOURCE,
+      null,
+      undefined,
+    ]) {
+      expect(isHumanAuthoritySource(messageSource(source))).toBe(false)
+    }
   })
 })
 
@@ -183,6 +253,31 @@ describe('openTurnHasDirectHumanInput', () => {
   })
 })
 
+describe('openTurnHasHumanAuthority', () => {
+  it('finds a shape-valid DevLead relay prompt after the open turn boundary', () => {
+    const exec = execution([turnStartEvent(0), userEvent(1, DEVLEAD_RELAY_SOURCE)])
+    expect(openTurnHasHumanAuthority(exec)).toBe(true)
+  })
+
+  it('ignores a relay prompt from before the open turn', () => {
+    const exec = execution([userEvent(0, DEVLEAD_RELAY_SOURCE), turnStartEvent(1)], 1)
+    expect(openTurnHasHumanAuthority(exec)).toBe(false)
+  })
+
+  it('rejects DevLead notices and malformed relay shapes', () => {
+    for (const source of [
+      DEVLEAD_NOTICE_SOURCE,
+      { kind: 'devlead', form: 'notice', senderSessionId: 'lead-session' },
+      { kind: 'devlead', form: 'relay' },
+      { kind: 'devlead', form: 'relay', senderSessionId: 42 },
+      { kind: 'devlead', form: 'relay', senderSessionId: '' },
+    ]) {
+      const exec = execution([turnStartEvent(0), userEvent(1, source)])
+      expect(openTurnHasHumanAuthority(exec)).toBe(false)
+    }
+  })
+})
+
 describe('openTurnHasInfiniGoalRound', () => {
   it('finds the exact admitted round', () => {
     const exec = execution([turnStartEvent(0), userEvent(1, ROUND_SOURCE)])
@@ -205,12 +300,26 @@ describe('pauseAuthority', () => {
     const agent = {} as Agent
     const human = executionFor(agent, [turnStartEvent(0), userEvent(1, { kind: 'user' })])
     expect(pauseAuthority(fakeContext([agent]), human, GOAL)).toEqual({ kind: 'direct-human' })
-    for (const source of [SCHEDULE_SOURCE, AGENT_MESSAGE_SOURCE, TEAM_MESSAGE_SOURCE, SUBAGENT_SETTLED_SOURCE]) {
+    for (const source of [SCHEDULE_SOURCE, AGENT_MESSAGE_SOURCE, TEAM_MESSAGE_SOURCE, SUBAGENT_SETTLED_SOURCE, RUNTIME_NOTICE_SOURCE, DEVLEAD_NOTICE_SOURCE]) {
       const exec = executionFor(agent, [turnStartEvent(0), userEvent(1, source)])
       expect(() => pauseAuthority(fakeContext([agent]), exec, GOAL)).toThrow(/pause requires/)
     }
     const stale = execution([turnStartEvent(0), userEvent(1, { ...ROUND_SOURCE, round: 1 })])
     expect(() => pauseAuthority(fakeContext([]), stale, GOAL)).toThrow(/pause requires/)
+  })
+
+  it('grants delegated-human authority for a relay prompt on the runtime root', () => {
+    const agent = {} as Agent
+    const relay = executionFor(agent, [turnStartEvent(0), userEvent(1, DEVLEAD_RELAY_SOURCE)])
+    expect(pauseAuthority(fakeContext([agent]), relay, GOAL)).toEqual({ kind: 'delegated-human' })
+    // A relay prompt the registry does not classify as a runtime root is rejected.
+    expect(() => pauseAuthority(fakeContext([]), relay, GOAL)).toThrow(/pause requires/)
+    // DevLead notices never grant authority.
+    const notice = executionFor(agent, [turnStartEvent(0), userEvent(1, DEVLEAD_NOTICE_SOURCE)])
+    expect(() => pauseAuthority(fakeContext([agent]), notice, GOAL)).toThrow(/pause requires/)
+    // A relay prompt from before the open turn is historical input, not authority.
+    const historical = executionFor(agent, [userEvent(0, DEVLEAD_RELAY_SOURCE), turnStartEvent(1)], 1)
+    expect(() => pauseAuthority(fakeContext([agent]), historical, GOAL)).toThrow(/pause requires/)
   })
 })
 
@@ -230,6 +339,13 @@ describe('completionAuthority', () => {
     expect(completionAuthority(fakeContext([]), exec, GOAL)).toEqual({ kind: 'goal-round', goal: GOAL })
   })
 
+  it('grants delegated-human authority for a relay prompt on the runtime root', () => {
+    const agent = {} as Agent
+    const relay = executionFor(agent, [turnStartEvent(0), userEvent(1, DEVLEAD_RELAY_SOURCE)])
+    expect(completionAuthority(fakeContext([agent]), relay, GOAL)).toEqual({ kind: 'delegated-human' })
+    expect(() => completionAuthority(fakeContext([]), relay, GOAL)).toThrow(/complete and blocked require/)
+  })
+
   it('rejects a call with neither authority and non-human sources', () => {
     const exec = execution([turnStartEvent(0), userEvent(1, { kind: 'user' })])
     expect(() => completionAuthority(fakeContext([]), exec, GOAL)).toThrow(HarnessError)
@@ -239,14 +355,14 @@ describe('completionAuthority', () => {
       expect((error as HarnessError).code).toBe('INFINI_GOAL_TOOL_AUTHORITY_REQUIRED')
       expect((error as HarnessError).message).toContain('never authorize')
     }
-    for (const source of [SCHEDULE_SOURCE, AGENT_MESSAGE_SOURCE, TEAM_MESSAGE_SOURCE, SUBAGENT_SETTLED_SOURCE]) {
+    for (const source of [SCHEDULE_SOURCE, AGENT_MESSAGE_SOURCE, TEAM_MESSAGE_SOURCE, SUBAGENT_SETTLED_SOURCE, RUNTIME_NOTICE_SOURCE, DEVLEAD_NOTICE_SOURCE]) {
       const nonHuman = execution([turnStartEvent(0), userEvent(1, source)])
       expect(() => completionAuthority(fakeContext([]), nonHuman, GOAL)).toThrow(/complete and blocked require/)
     }
   })
 })
 
-describe('requireDirectHuman', () => {
+describe('requireHumanAuthority', () => {
   it('accepts a root human turn and rejects an automatic round', () => {
     const agent = {} as Agent
     const human: InfiniGoalToolExecution = {
@@ -254,13 +370,39 @@ describe('requireDirectHuman', () => {
       events: [turnStartEvent(0), userEvent(1, { kind: 'user' })],
       openTurnStartSeq: SessionSeq(0),
     }
-    expect(() => requireDirectHuman(fakeContext([agent]), human)).not.toThrow()
+    expect(() => requireHumanAuthority(fakeContext([agent]), human)).not.toThrow()
     const round = execution([turnStartEvent(0), userEvent(1, ROUND_SOURCE)])
-    expect(() => requireDirectHuman(fakeContext([agent]), { ...round, agent }))
+    expect(() => requireHumanAuthority(fakeContext([agent]), { ...round, agent }))
       .toThrow(/direct human turn/)
-    for (const source of [SCHEDULE_SOURCE, AGENT_MESSAGE_SOURCE, TEAM_MESSAGE_SOURCE, SUBAGENT_SETTLED_SOURCE]) {
+    for (const source of [SCHEDULE_SOURCE, AGENT_MESSAGE_SOURCE, TEAM_MESSAGE_SOURCE, SUBAGENT_SETTLED_SOURCE, RUNTIME_NOTICE_SOURCE, DEVLEAD_NOTICE_SOURCE]) {
       const nonHuman = executionFor(agent, [turnStartEvent(0), userEvent(1, source)])
-      expect(() => requireDirectHuman(fakeContext([agent]), nonHuman)).toThrow(/never authorize/)
+      expect(() => requireHumanAuthority(fakeContext([agent]), nonHuman)).toThrow(/never authorize/)
+    }
+  })
+
+  it('accepts a shape-valid DevLead relay prompt on the runtime root', () => {
+    const agent = {} as Agent
+    const relay = executionFor(agent, [turnStartEvent(0), userEvent(1, DEVLEAD_RELAY_SOURCE)])
+    expect(() => requireHumanAuthority(fakeContext([agent]), relay)).not.toThrow()
+  })
+
+  it('rejects a relay prompt on a subagent, a historical relay, and malformed relay shapes', () => {
+    const agent = {} as Agent
+    const relay = executionFor(agent, [turnStartEvent(0), userEvent(1, DEVLEAD_RELAY_SOURCE)])
+    const subagentError = rejectionOf(() => requireHumanAuthority(fakeContext([]), relay))
+    expect(subagentError.code).toBe('INFINI_GOAL_TOOL_AUTHORITY_REQUIRED')
+
+    const historical = executionFor(agent, [userEvent(0, DEVLEAD_RELAY_SOURCE), turnStartEvent(1)], 1)
+    expect(() => requireHumanAuthority(fakeContext([agent]), historical)).toThrow(/never authorize/)
+
+    for (const source of [
+      DEVLEAD_NOTICE_SOURCE,
+      { kind: 'devlead', form: 'relay' },
+      { kind: 'devlead', form: 'relay', senderSessionId: '' },
+      { kind: 'devlead', form: 'relay', senderSessionId: 42 },
+    ]) {
+      const malformed = executionFor(agent, [turnStartEvent(0), userEvent(1, source)])
+      expect(() => requireHumanAuthority(fakeContext([agent]), malformed)).toThrow(/never authorize/)
     }
   })
 })
@@ -359,16 +501,18 @@ describe('infiniGoalToolExecution', () => {
   })
 })
 
-describe('requireDirectHuman on a subagent', () => {
-  it('rejects human-looking input when the agent is not a runtime root', () => {
+describe('requireHumanAuthority on a subagent', () => {
+  it('rejects human-looking input and DevLead relay prompts when the agent is not a runtime root', () => {
     const agent = {} as Agent
-    const human: InfiniGoalToolExecution = {
-      agent,
-      events: [turnStartEvent(0), userEvent(1, { kind: 'user' })],
-      openTurnStartSeq: SessionSeq(0),
+    for (const source of [{ kind: 'user' }, DEVLEAD_RELAY_SOURCE]) {
+      const exec: InfiniGoalToolExecution = {
+        agent,
+        events: [turnStartEvent(0), userEvent(1, source)],
+        openTurnStartSeq: SessionSeq(0),
+      }
+      const error = rejectionOf(() => requireHumanAuthority(fakeContext([]), exec))
+      expect(error.code).toBe('INFINI_GOAL_TOOL_AUTHORITY_REQUIRED')
     }
-    const error = rejectionOf(() => requireDirectHuman(fakeContext([]), human))
-    expect(error.code).toBe('INFINI_GOAL_TOOL_AUTHORITY_REQUIRED')
   })
 })
 
@@ -400,10 +544,23 @@ describe('completionAuthority across DSH registry shapes', () => {
     expect(completionAuthority(fakeRc3Context(agent), exec, GOAL)).toEqual({ kind: 'direct-human' })
   })
 
+  it('grants delegated-human authority for a relay prompt on a rc.3-style root', () => {
+    const agent = headerAgent()
+    const exec = executionFor(agent, [turnStartEvent(0), userEvent(1, DEVLEAD_RELAY_SOURCE)])
+    expect(completionAuthority(fakeRc3Context(agent), exec, GOAL)).toEqual({ kind: 'delegated-human' })
+  })
+
   it('rejects human-looking input on a rc.3-style subagent', () => {
     const agent = headerAgent('subagent')
     const exec = executionFor(agent, [turnStartEvent(0), userEvent(1, { kind: 'user' })])
-    const error = rejectionOf(() => requireDirectHuman(fakeRc3Context(agent), exec))
+    const error = rejectionOf(() => requireHumanAuthority(fakeRc3Context(agent), exec))
+    expect(error.code).toBe('INFINI_GOAL_TOOL_AUTHORITY_REQUIRED')
+  })
+
+  it('rejects a relay prompt on a rc.3-style subagent', () => {
+    const agent = headerAgent('subagent')
+    const exec = executionFor(agent, [turnStartEvent(0), userEvent(1, DEVLEAD_RELAY_SOURCE)])
+    const error = rejectionOf(() => requireHumanAuthority(fakeRc3Context(agent), exec))
     expect(error.code).toBe('INFINI_GOAL_TOOL_AUTHORITY_REQUIRED')
   })
 })

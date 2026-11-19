@@ -114,7 +114,7 @@ export interface InfiniGoalProjection {
 
 /** Values a caller may override when creating a goal. */
 export interface InfiniGoalCreateRequest {
-  /** Non-empty completion objective, inferred from a direct human request. */
+  /** Non-empty completion objective, inferred from a direct human or delegated (DevLead relay) request. */
   readonly objective: string
   /** Optional override of the deployment default minimum trigger interval. */
   readonly minIntervalMs?: number

@@ -21,6 +21,7 @@ const NOW = Date.now()
 /** Captured tool definition with just the surface these tests call. */
 interface CapturedTool {
   readonly name: string
+  readonly description?: string
   readonly parameters: unknown
   readonly presentCall?: (args: unknown) => unknown
   execute(args: unknown, exec: unknown): Promise<unknown>
@@ -139,16 +140,18 @@ interface Harness {
   readonly goals: FakeInfiniGoals
   readonly definitions: Map<string, CapturedTool>
   readonly deferred: { source?: { kind: string; form?: string; summary?: string } }[]
+  readonly prompt: string
   setEvents(events: readonly unknown[]): void
   call(name: string, args: unknown): Promise<unknown>
 }
 
 /** Boot the tool plugin against stub services with an empty session history. */
-function boot(config: Config = {}): Harness {
+function boot(config: Config = {}, options: { root?: boolean } = {}): Harness {
   const goals = new FakeInfiniGoals()
   const definitions = new Map<string, CapturedTool>()
   const deferred: { source?: { kind: string; form?: string; summary?: string } }[] = []
   let events: readonly unknown[] = [turnStartEvent(0)]
+  let prompt = ''
   const agent = {
     id: 'agent-1',
     status: 'running',
@@ -158,12 +161,15 @@ function boot(config: Config = {}): Harness {
     agents: {
       get: () => agent,
       currentInitiator: () => agent,
-      roots: () => [agent],
+      roots: () => options.root === false ? [] : [agent],
       turnBoundaryOf: () => ({ openTurnStartSeq: 0, lastStepStartSeq: null, lastStepBoundary: null, lastTurn: 1 }),
     },
     infiniGoals: goals,
     systemPrompt: {
-      section: () => () => {},
+      section: (section: { text: string }) => {
+        prompt = section.text
+        return () => {}
+      },
       getSectionOrder: () => 2400,
     },
     tools: {
@@ -184,6 +190,7 @@ function boot(config: Config = {}): Harness {
     goals,
     definitions,
     deferred,
+    prompt,
     setEvents: (next) => { events = next },
     call: (name, args) => {
       const definition = definitions.get(name)
@@ -226,6 +233,14 @@ function agentMessageTurn(harness: Harness): void {
   ])
 }
 
+/** Grant a shape-valid DevLead relay prompt for the next call. */
+function devLeadRelayTurn(harness: Harness): void {
+  harness.setEvents([
+    turnStartEvent(0),
+    userMessageEvent(1, { kind: 'devlead', form: 'relay', senderSessionId: 'lead-session' }),
+  ])
+}
+
 /** The value returned by the tools, narrowed for assertions. */
 interface ToolValue {
   readonly goal: null | {
@@ -260,6 +275,18 @@ describe('infini-goal tool registration', () => {
     expect(harness.definitions.get('update_infini_goal')?.presentCall?.(
       { goal_id: 'goal-1', revision: 1, action: 'pause' },
     )).toMatchObject({ card: 'generic', title: 'Pause infini-goal' })
+  })
+
+  it('documents the DevLead relay authority exception consistently', () => {
+    const harness = boot()
+    expect(harness.prompt).toContain('DevLead relay')
+    expect(harness.prompt).toContain('DevLead notices')
+    expect(harness.prompt).not.toMatch(/require a direct human request\./)
+    expect(harness.definitions.get('create_infini_goal')?.description).toContain('DevLead relay')
+    const parameters = harness.definitions.get('update_infini_goal')?.parameters as
+      { properties?: { action?: { description?: string } } } | undefined
+    expect(parameters?.properties?.action?.description).toContain('DevLead relay')
+    expect(parameters?.properties?.action?.description).toContain('DevLead notices')
   })
 
   it('rejects an invalid blocked threshold before registering anything', () => {
@@ -325,7 +352,7 @@ describe('get_infini_goal', () => {
 })
 
 describe('create_infini_goal', () => {
-  it('requires direct human authority', async () => {
+  it('requires human authority', async () => {
     const harness = boot()
     await expect(harness.call('create_infini_goal', { objective: 'Ship the docs' }))
       .rejects.toMatchObject({
@@ -340,6 +367,38 @@ describe('create_infini_goal', () => {
     await expect(harness.call('create_infini_goal', { objective: 'Ship the docs' }))
       .rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_AUTHORITY_REQUIRED' })
     agentMessageTurn(harness)
+    await expect(harness.call('create_infini_goal', { objective: 'Ship the docs' }))
+      .rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_AUTHORITY_REQUIRED' })
+  })
+
+  it('creates the goal from a shape-valid DevLead relay prompt', async () => {
+    const harness = boot()
+    devLeadRelayTurn(harness)
+    const value = valueOf(await harness.call('create_infini_goal', { objective: 'Ship the docs' }))
+    expect(value.goal?.objective).toBe('Ship the docs')
+    expect(value.goal?.phase).toBe('active')
+  })
+
+  it('rejects DevLead notices and malformed DevLead sources', async () => {
+    const harness = boot()
+    for (const source of [
+      { kind: 'devlead', form: 'notice' },
+      { kind: 'devlead', form: 'notice', senderSessionId: 'lead-session' },
+      { kind: 'devlead', form: 'relay' },
+      { kind: 'devlead', form: 'relay', senderSessionId: 42 },
+      { kind: 'devlead', form: 'relay', senderSessionId: '' },
+      { kind: 'devlead', form: 'other', senderSessionId: 'lead-session' },
+    ]) {
+      harness.setEvents([turnStartEvent(0), userMessageEvent(1, source)])
+      await expect(harness.call('create_infini_goal', { objective: 'Ship the docs' }))
+        .rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_AUTHORITY_REQUIRED' })
+    }
+    expect(harness.goals.goal).toBeUndefined()
+  })
+
+  it('does not authorize a DevLead relay prompt on a subagent', async () => {
+    const harness = boot({}, { root: false })
+    devLeadRelayTurn(harness)
     await expect(harness.call('create_infini_goal', { objective: 'Ship the docs' }))
       .rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_AUTHORITY_REQUIRED' })
   })
@@ -385,7 +444,7 @@ describe('create_infini_goal', () => {
 })
 
 describe('update_infini_goal', () => {
-  it('requires direct human authority for edit, pause, resume, and config', async () => {
+  it('requires human authority for edit, pause, resume, and config', async () => {
     const harness = boot()
     humanTurn(harness)
     const created = valueOf(await harness.call('create_infini_goal', { objective: 'Ship the docs' }))
@@ -401,6 +460,64 @@ describe('update_infini_goal', () => {
       .rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_AUTHORITY_REQUIRED' })
     await expect(harness.call('update_infini_goal', { ...ref, action: 'config', min_interval: '2m' }))
       .rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_AUTHORITY_REQUIRED' })
+  })
+
+  it('authorizes every update action from a DevLead relay prompt', async () => {
+    const harness = boot()
+    const goalOf = (value: ToolValue): NonNullable<ToolValue['goal']> => {
+      if (value.goal === null) throw new Error('expected a goal')
+      return value.goal
+    }
+    devLeadRelayTurn(harness)
+    const created = goalOf(valueOf(await harness.call('create_infini_goal', { objective: 'Ship the docs' })))
+    devLeadRelayTurn(harness)
+    const edited = goalOf(valueOf(await harness.call('update_infini_goal', {
+      goal_id: created.id,
+      revision: created.revision,
+      action: 'edit',
+      objective: 'Ship v2',
+    })))
+    devLeadRelayTurn(harness)
+    const configured = goalOf(valueOf(await harness.call('update_infini_goal', {
+      goal_id: edited.id,
+      revision: edited.revision,
+      action: 'config',
+      min_interval: '2m',
+    })))
+    devLeadRelayTurn(harness)
+    const paused = goalOf(valueOf(await harness.call('update_infini_goal', {
+      goal_id: configured.id,
+      revision: configured.revision,
+      action: 'pause',
+    })))
+    devLeadRelayTurn(harness)
+    const resumed = goalOf(valueOf(await harness.call('update_infini_goal', {
+      goal_id: paused.id,
+      revision: paused.revision,
+      action: 'resume',
+    })))
+    devLeadRelayTurn(harness)
+    const blocked = goalOf(valueOf(await harness.call('update_infini_goal', {
+      goal_id: resumed.id,
+      revision: resumed.revision,
+      action: 'blocked',
+      blocked_reason: 'credentials expired',
+    })))
+    devLeadRelayTurn(harness)
+    const completed = goalOf(valueOf(await harness.call('update_infini_goal', {
+      goal_id: blocked.id,
+      revision: blocked.revision,
+      action: 'complete',
+    })))
+    expect(edited.objective).toBe('Ship v2')
+    expect(configured.minIntervalMs).toBe(120_000)
+    expect(paused.phase).toBe('paused')
+    expect(resumed.phase).toBe('active')
+    // A relay prompt is human-equivalent: it may block below the automatic-round
+    // threshold, and it does not inject the autonomous-round wrap-up context.
+    expect(blocked.phase).toBe('blocked')
+    expect(completed.phase).toBe('complete')
+    expect(harness.deferred).toHaveLength(0)
   })
 
   it('allows pause from the exact current goal round', async () => {
@@ -544,7 +661,7 @@ describe('update_infini_goal', () => {
     expect(harness.deferred[0]?.source?.summary).toContain('complete: Ship the docs')
   })
 
-  it('rejects completion outside a direct human turn or the exact goal round', async () => {
+  it('rejects completion outside human authority or the exact goal round', async () => {
     const harness = boot()
     humanTurn(harness)
     const created = valueOf(await harness.call('create_infini_goal', { objective: 'Ship the docs' }))
