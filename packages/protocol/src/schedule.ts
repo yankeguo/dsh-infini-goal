@@ -13,7 +13,7 @@
  */
 
 import type { InfiniGoalSettings, QuietWindow } from './types.ts'
-import { parseClockTime } from './quiet-windows.ts'
+import { parseClockTime, parseQuietWindowEnd } from './quiet-windows.ts'
 
 /** One minute in milliseconds. */
 const MINUTE_MS = 60_000
@@ -302,12 +302,17 @@ function windowBounds(
     return undefined
   }
   const startMinutes = parseClockTime(window.start)
-  const endMinutes = parseClockTime(window.end)
-  const endDate = endMinutes <= startMinutes ? addDays(startDate, 1) : startDate
+  // `24:00` (and its legacy `23:59` spelling) is the end-of-day sentinel: the
+  // end resolves to the next local day's midnight, never 23:59:00.
+  const endMinutes = parseQuietWindowEnd(window.end)
+  const endDate = endMinutes < 1_440 && endMinutes > startMinutes
+    ? startDate
+    : addDays(startDate, 1)
+  const endClockMinutes = endMinutes === 1_440 ? 0 : endMinutes
   // A window must cover every wall-clock minute it names, so its start resolves
   // to the first occurrence of an ambiguous clock and its end to the last one.
   const start = resolveLocalInstant(timeZone, startDate, startMinutes, 'earliest')
-  const end = resolveLocalInstant(timeZone, endDate, endMinutes, 'latest')
+  const end = resolveLocalInstant(timeZone, endDate, endClockMinutes, 'latest')
   // A DST gap can collapse a window whose both ends do not exist (e.g. 02:00-02:30
   // on a spring-forward day); such an occurrence covers no instant.
   if (end <= start) return undefined

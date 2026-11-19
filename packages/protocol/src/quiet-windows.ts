@@ -101,12 +101,48 @@ export function formatWeekdays(days: readonly number[]): string {
 
 /** Parse one `HH:mm` clock time into minutes after local midnight. */
 export function parseClockTime(value: string): number {
-  const match = /^(\d{1,2}):(\d{2})$/u.exec(value.trim())
-  if (match === null) throw new TypeError(`invalid clock time "${value}" (expected HH:mm)`)
-  const hour = Number(match[1])
-  const minute = Number(match[2])
+  const { hour, minute } = clockParts(value)
   if (hour > 23 || minute > 59) throw new TypeError(`invalid clock time "${value}" (expected 00:00-23:59)`)
   return hour * 60 + minute
+}
+
+/** Split one strict `H:mm`-style clock token into its hour and minute fields. */
+function clockParts(value: string): { readonly hour: number; readonly minute: number } {
+  const match = /^(\d{1,2}):(\d{2})$/u.exec(value.trim())
+  if (match === null) throw new TypeError(`invalid clock time "${value}" (expected HH:mm)`)
+  return { hour: Number(match[1]), minute: Number(match[2]) }
+}
+
+/**
+ * Parse one quiet-window end clock, accepting the `24:00` sentinel without
+ * applying the legacy `23:59` normalization.
+ * @param value - caller-supplied end clock.
+ * @returns whole minutes after midnight, 0-1440.
+ * @throws {TypeError} when the clock is not `HH:mm` / `24:00`.
+ */
+function parseEndClockTime(value: string): number {
+  const { hour, minute } = clockParts(value)
+  if (hour === 24 && minute === 0) return 1_440
+  if (hour > 23 || minute > 59) {
+    throw new TypeError(`invalid clock time "${value}" (expected 00:00-23:59 or 24:00)`)
+  }
+  return hour * 60 + minute
+}
+
+/**
+ * Parse one quiet-window end clock into minutes after the start day's midnight.
+ *
+ * `24:00` is the exclusive end-of-day sentinel and resolves to 1440. The legacy
+ * `23:59` spelling is normalized to the same sentinel: because `end` is
+ * exclusive, treating it as 23:59:00 leaves a one-minute hole before midnight
+ * when the next window starts at 00:00.
+ * @param value - caller-supplied end clock.
+ * @returns whole minutes after midnight, 0-1440, with 23:59 normalized to 1440.
+ * @throws {TypeError} when the clock is not `HH:mm` / `24:00`.
+ */
+export function parseQuietWindowEnd(value: string): number {
+  const minutes = parseEndClockTime(value)
+  return minutes === 1_439 ? 1_440 : minutes
 }
 
 /**
@@ -127,14 +163,16 @@ export function formatClockTime(minutes: number): string {
 /**
  * Normalize and validate one caller-supplied quiet window.
  *
- * `start` is inclusive and `end` exclusive; `end < start` crosses midnight into
- * the next local day and the weekday filter applies to the start day. Equal
- * start and end would be a zero-length window, so it is rejected instead of
- * being silently interpreted as a full day. An omitted (or YAML-empty, i.e.
- * `null`) `days` field means every day; entries in an explicit array must be
- * ISO weekday numbers 1-7.
+ * `start` is inclusive and `end` exclusive; `end` may be `24:00`, the end of
+ * the start day (next local midnight), while `start` stays within
+ * 00:00-23:59. `end < start` crosses midnight into the next local day and the
+ * weekday filter applies to the start day. Equal start and end would be a
+ * zero-length window, so it is rejected instead of being silently interpreted
+ * as a full day (`00:00-24:00` is the explicit full-day form). An omitted (or
+ * YAML-empty, i.e. `null`) `days` field means every day; entries in an explicit
+ * array must be ISO weekday numbers 1-7.
  * @param value - candidate window object with `days`, `start`, and `end`.
- * @returns a normalized detached window.
+ * @returns a normalized detached window; legacy `23:59` ends become `24:00`.
  * @throws {TypeError} when any field is invalid.
  */
 export function validateQuietWindow(value: unknown): QuietWindow {
@@ -147,9 +185,8 @@ export function validateQuietWindow(value: unknown): QuietWindow {
   if (typeof start !== 'string' || typeof end !== 'string') {
     throw new TypeError('quiet window start and end must be HH:mm strings')
   }
-  parseClockTime(start)
-  parseClockTime(end)
-  if (normalizeClock(start) === normalizeClock(end)) {
+  const startMinutes = parseClockTime(start)
+  if (startMinutes === parseEndClockTime(end)) {
     throw new TypeError(`quiet window start and end must differ (received ${start}-${end})`)
   }
   const rawDays = record['days']
@@ -168,12 +205,18 @@ export function validateQuietWindow(value: unknown): QuietWindow {
   } else {
     throw new TypeError('quiet window days must be an array of ISO weekday numbers')
   }
-  return { days, start: normalizeClock(start), end: normalizeClock(end) }
+  return { days, start: normalizeClock(start), end: normalizeEndClock(end) }
 }
 
 /** Normalize a validated clock string to two-digit `HH:mm`. */
 function normalizeClock(value: string): string {
   return formatClockTime(parseClockTime(value))
+}
+
+/** Normalize a validated end clock, rendering the end-of-day sentinel as `24:00`. */
+function normalizeEndClock(value: string): string {
+  const minutes = parseQuietWindowEnd(value)
+  return minutes === 1_440 ? '24:00' : formatClockTime(minutes)
 }
 
 /**
@@ -198,10 +241,11 @@ export function validateQuietWindows(value: unknown): QuietWindow[] {
  * text mean no quiet windows; `always` and `all` are rejected because they would
  * stop every automatic round forever.
  *
- * Semantics: `start` is inclusive, `end` exclusive; `end < start` crosses
- * midnight; the weekday selector filters the day the window starts on and an
- * empty selector means every day. Lists that together cover every local time
- * are accepted here (the scheduler rejects them with a `RangeError`).
+ * Semantics: `start` is inclusive, `end` exclusive; `end` may be `24:00`, the
+ * end-of-day sentinel (legacy `23:59` ends normalize to it), and `end < start`
+ * crosses midnight; the weekday selector filters the day the window starts on
+ * and an empty selector means every day. Lists that together cover every local
+ * time are accepted here (the scheduler rejects them with a `RangeError`).
  * @param text - caller-supplied window text.
  * @returns normalized quiet windows.
  * @throws {TypeError} when the text is not valid quiet-window syntax.
@@ -219,7 +263,7 @@ export function parseQuietWindows(text: string): QuietWindow[] {
     if (entry.length === 0) continue
     const match = ENTRY.exec(entry)
     if (match === null) {
-      throw new TypeError(`invalid quiet window "${entry}" (expected [Mo-Fr ]HH:mm-HH:mm)`)
+      throw new TypeError(`invalid quiet window "${entry}" (expected [Mo-Fr ]HH:mm-HH:mm, end may be 24:00)`)
     }
     windows.push(validateQuietWindow({
       days: match[1] === undefined ? [] : parseWeekdays(match[1]),
@@ -232,7 +276,7 @@ export function parseQuietWindows(text: string): QuietWindow[] {
 
 /**
  * Render quiet windows in the canonical text form accepted by
- * {@link parseQuietWindows}.
+ * {@link parseQuietWindows}. The end-of-day sentinel is rendered as `24:00`.
  * @param windows - normalized windows (as returned by {@link validateQuietWindows}).
  * @returns canonical text, or `none` when the list is empty.
  */

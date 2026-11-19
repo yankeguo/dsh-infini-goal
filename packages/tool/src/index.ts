@@ -202,7 +202,8 @@ export function apply(ctx: Context, config: Config): void {
       quiet_windows: {
         type: 'string',
         description: 'Optional local-time windows where no automatic round starts (the goal stays active and human turns continue), '
-          + 'such as "Mo-Fr 09:00-18:00" or "Mo-Fr 09:00-18:00; Sa,Su 10:00-12:00"; "none" disables them.',
+          + 'such as "Mo-Fr 09:00-18:00" or "Fr 18:00-24:00"; each end is exclusive and "24:00" means the end of '
+          + 'the start day (legacy "23:59" is normalized to it); "none" disables them.',
       },
       timezone: {
         type: 'string',
@@ -256,7 +257,9 @@ export function apply(ctx: Context, config: Config): void {
       },
       quiet_windows: {
         type: 'string',
-        description: 'Replacement local-time quiet windows such as "Mo-Fr 09:00-18:00"; "none" disables them.',
+        description: 'Replacement local-time quiet windows such as "Mo-Fr 09:00-18:00" or "Fr 18:00-24:00"; '
+          + 'each end is exclusive and "24:00" means the end of the start day (legacy "23:59" is normalized to it); '
+          + '"none" disables them.',
       },
       timezone: {
         type: 'string',

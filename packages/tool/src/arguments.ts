@@ -83,7 +83,8 @@ export function parseMinIntervalArg(text: string): number {
 
 /**
  * Parse quiet-window text such as `Mo-Fr 09:00-18:00; Sa,Su 10:00-12:00`,
- * `HH:mm-HH:mm`, or `none`.
+ * `HH:mm-HH:mm`, or `none`. The end may be `24:00` (end of the start day) and
+ * legacy `23:59` ends are normalized to it.
  *
  * Whitespace-only text is rejected instead of being treated as `none`: the
  * strict tool schema uses `""` as the omitted filler, so a blank value is much
@@ -101,7 +102,7 @@ export function parseQuietWindowsArg(text: string): QuietWindow[] {
   } catch (error) {
     reject(
       `quiet_windows "${text}" is not valid: ${reasonOf(error)}. `
-      + 'Use "Mo-Fr 09:00-18:00", "09:00-18:00", several entries separated by ";", or "none".',
+      + 'Use "Mo-Fr 09:00-18:00", "Fr 18:00-24:00", several entries separated by ";", or "none".',
     )
   }
 }

@@ -134,7 +134,7 @@ export function parseInfiniGoalCommand(rawInput: string): InfiniGoalCommand {
     case 'quiet': {
       const windows = unquote(rest)
       return windows.length === 0
-        ? missingArgument('quiet', 'text such as "Mo-Fr 09:00-18:00" or "none"')
+        ? missingArgument('quiet', 'text such as "Mo-Fr 09:00-18:00", "Fr 18:00-24:00", or "none"')
         : { kind: 'quiet', windows }
     }
     case 'timezone': {
@@ -180,7 +180,8 @@ export function parseIntervalArgument(text: string): number {
 }
 
 /**
- * Parse a quiet-windows argument such as `Mo-Fr 09:00-18:00` or `none`.
+ * Parse a quiet-windows argument such as `Mo-Fr 09:00-18:00`, `Fr 18:00-24:00`,
+ * or `none`.
  * @param text - caller-supplied quiet-window text.
  * @returns normalized quiet windows; an empty list for `none`.
  * @throws {CommandInputError} when the text is not usable quiet-window grammar.
@@ -191,7 +192,7 @@ export function parseQuietArgument(text: string): QuietWindow[] {
   } catch (error) {
     throw new CommandInputError(
       `Invalid quiet windows "${text}": ${reasonOf(error)}. `
-      + 'Use "Mo-Fr 09:00-18:00", "09:00-18:00", several entries separated by ";", or "none".',
+      + 'Use "Mo-Fr 09:00-18:00", "Fr 18:00-24:00", several entries separated by ";", or "none".',
     )
   }
 }

@@ -53,9 +53,13 @@ export interface InfiniGoalBlockReason {
 export interface QuietWindow {
   /** ISO weekday numbers the window starts on (1 = Monday … 7 = Sunday); empty means every day. */
   readonly days: readonly number[]
-  /** Local wall-clock start, `HH:mm`, inclusive. */
+  /** Local wall-clock start, `HH:mm`, inclusive (00:00-23:59). */
   readonly start: string
-  /** Local wall-clock end, `HH:mm`, exclusive; a value before `start` crosses midnight. */
+  /**
+   * Local wall-clock end, exclusive. `HH:mm` before `start` crosses midnight;
+   * `24:00` is the end-of-day sentinel (next local midnight). The legacy `23:59`
+   * spelling is normalized to `24:00` during validation.
+   */
   readonly end: string
 }
 

@@ -4,6 +4,7 @@ import {
   formatQuietWindows,
   formatWeekdays,
   parseClockTime,
+  parseQuietWindowEnd,
   parseQuietWindows,
   parseWeekdays,
   validateQuietWindows,
@@ -47,6 +48,14 @@ describe('clock helpers', () => {
     expect(() => parseClockTime('09:60')).toThrow()
   })
 
+  it('parses quiet-window ends with the 24:00 sentinel and legacy 23:59 normalization', () => {
+    expect(parseQuietWindowEnd('00:00')).toBe(0)
+    expect(parseQuietWindowEnd('23:59')).toBe(1_440)
+    expect(parseQuietWindowEnd('24:00')).toBe(1_440)
+    expect(() => parseQuietWindowEnd('24:01')).toThrow()
+    expect(() => parseQuietWindowEnd('25:00')).toThrow()
+  })
+
   it('rejects minutes that are not a whole minute inside one day', () => {
     expect(() => formatClockTime(-1)).toThrow()
     expect(() => formatClockTime(1_440)).toThrow()
@@ -74,6 +83,26 @@ describe('quiet window text form', () => {
     expect(() => parseQuietWindows('00:01-00:01')).toThrow(/must differ/)
   })
 
+  it('normalizes legacy 23:59 ends to the 24:00 end-of-day sentinel', () => {
+    const windows = parseQuietWindows('Fr 18:00-23:59; Sa 00:00-23:59')
+    expect(windows).toEqual([
+      { days: [5], start: '18:00', end: '24:00' },
+      { days: [6], start: '00:00', end: '24:00' },
+    ])
+    expect(formatQuietWindows(windows)).toBe('Fr 18:00-24:00; Sa 00:00-24:00')
+  })
+
+  it('accepts 24:00 only as an end and keeps equal clocks invalid', () => {
+    expect(parseQuietWindows('00:00-24:00'))
+      .toEqual([{ days: [], start: '00:00', end: '24:00' }])
+    expect(formatQuietWindows(parseQuietWindows('Fr 18:00-24:00')))
+      .toBe('Fr 18:00-24:00')
+    expect(() => parseQuietWindows('24:00-06:00')).toThrow(/expected 00:00-23:59/)
+    expect(() => parseQuietWindows('24:00-24:00')).toThrow(/expected 00:00-23:59/)
+    expect(() => parseQuietWindows('00:00-00:00')).toThrow(/must differ/)
+    expect(() => parseQuietWindows('23:59-23:59')).toThrow(/must differ/)
+  })
+
   it('rejects malformed entries and whole-day windows', () => {
     expect(() => parseQuietWindows('09:00')).toThrow()
     expect(() => parseQuietWindows('09:00-09:00')).toThrow()
@@ -91,6 +120,15 @@ describe('validateQuietWindows', () => {
   it('treats a missing `days` field as every day', () => {
     expect(validateQuietWindows([{ start: '09:00', end: '18:00' }]))
       .toEqual([{ days: [], start: '09:00', end: '18:00' }])
+  })
+
+  it('normalizes object-form 23:59 ends and accepts 24:00', () => {
+    expect(validateQuietWindows([{ start: '18:00', end: '23:59' }]))
+      .toEqual([{ days: [], start: '18:00', end: '24:00' }])
+    expect(validateQuietWindows([{ start: '00:00', end: '24:00' }]))
+      .toEqual([{ days: [], start: '00:00', end: '24:00' }])
+    expect(() => validateQuietWindows([{ start: '24:00', end: '24:00' }])).toThrow()
+    expect(() => validateQuietWindows([{ start: '23:59', end: '23:59' }])).toThrow(/must differ/)
   })
 
   it('rejects sparse arrays instead of returning holes', () => {

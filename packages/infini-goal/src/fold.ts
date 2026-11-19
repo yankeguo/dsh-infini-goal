@@ -140,7 +140,12 @@ function decodeQuietWindow(value: unknown, field: string): QuietWindow {
     || days.some((day, index) => day !== normalized.days[index])) {
     throw new Error(`${field}.days must be ascending unique ISO weekday numbers 1-7`)
   }
-  if (value['start'] !== normalized.start || value['end'] !== normalized.end) {
+  const startIsCanonical = value['start'] === normalized.start
+  const endIsCanonical = value['end'] === normalized.end
+  // Accept the legacy end-of-day spelling during replay; validation normalizes
+  // it to the canonical `24:00` sentinel.
+  const legacyEndOfDay = value['end'] === '23:59' && normalized.end === '24:00'
+  if (!startIsCanonical || (!endIsCanonical && !legacyEndOfDay)) {
     throw new Error(`${field} start and end must be canonical HH:mm clock times`)
   }
   return normalized

@@ -236,7 +236,7 @@ id — note that DSH patches replace the row's config wholesale).
   name: '@yankeguo/dsh-infini-goal'
   config:
     defaultMinIntervalMs: 60000        # default minimum trigger interval
-    defaultQuietWindows: []            # default quiet windows; elements are { days: [1..7], start: 'HH:mm', end: 'HH:mm' }
+    defaultQuietWindows: []            # default quiet windows; elements are { days: [1..7], start: 'HH:mm', end: 'HH:mm' or '24:00' }
     timezone: Asia/Shanghai            # default quiet-window time zone; falls back to the host system zone
 ```
 
@@ -291,7 +291,11 @@ write each goal's own durable settings, which take precedence over deployment de
   - empty `days` = every day; ISO weekdays 1=Monday … 7=Sunday, supporting `Mo-Fr`, `Sa,Su`, `1-5`;
     `daily` / `everyday` / `*` all mean every day;
   - a window's `start` is included and `end` excluded; `end < start` means crossing midnight (e.g.
-    `22:00-06:00`); `start == end` is rejected;
+    `22:00-06:00`); `start == end` is rejected. `end` may be `24:00`, the exclusive end of the
+    start day (next local midnight), while `start` stays within `00:00-23:59`; because a legacy
+    `end` of `23:59` would leave the 23:59 minute uncovered, it is normalized to `24:00` (an
+    existing `Fr 18:00-23:59; Sa 00:00-23:59` becomes `Fr 18:00-24:00; Sa 00:00-24:00`).
+    `00:00-24:00` is the explicit full-day form;
   - `days` filters the **starting day** of the window, e.g. `Sa-Su 22:00-06:00` covers Saturday
     22:00→Sunday 06:00 and Sunday 22:00→Monday 06:00;
   - multiple windows form a union; the time zone comes from `timezone`, and windows advance by local

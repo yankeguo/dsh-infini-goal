@@ -217,7 +217,7 @@ node scripts/repair-session-log.mjs --write --dsh-home ~/.dsh
   name: '@yankeguo/dsh-infini-goal'
   config:
     defaultMinIntervalMs: 60000        # 默认最小触发间隔
-    defaultQuietWindows: []            # 默认静默时段，元素 { days: [1..7], start: 'HH:mm', end: 'HH:mm' }
+    defaultQuietWindows: []            # 默认静默时段，元素 { days: [1..7], start: 'HH:mm', end: 'HH:mm' 或 '24:00' }
     timezone: Asia/Shanghai            # 默认静默时区；缺省取宿主系统时区
 ```
 
@@ -272,7 +272,10 @@ bundle 里的工具行没有显式写这项配置，等价于使用默认值 `3`
   - `days` 为空 = 每天；ISO 星期 1=周一 … 7=周日，支持 `Mo-Fr`、`Sa,Su`、`1-5`；
     `daily` / `everyday` / `*` 等价于每天；
   - 窗口的 `start` 含、`end` 不含；`end < start` 表示跨午夜（如 `22:00-06:00`），
-    `start == end` 会被拒绝；
+    `start == end` 会被拒绝。`end` 可以写 `24:00`，表示开始日的结束（即次日 00:00），
+    而 `start` 仍限制在 `00:00-23:59`；历史配置里的 `end=23:59` 会归一化为 `24:00`（如
+    `Fr 18:00-23:59; Sa 00:00-23:59` 归一化为 `Fr 18:00-24:00; Sa 00:00-24:00`），
+    否则 end 不含会在 23:59 留出一分钟空洞。`00:00-24:00` 是显式的全天形式；
   - `days` 过滤的是窗口**开始日**，例如 `Sa-Su 22:00-06:00` 覆盖周六 22:00→周日 06:00
     与周日 22:00→周一 06:00；
   - 多条窗口取并集；时区由 `timezone` 决定，跨夏令时按本地墙钟时间推进；

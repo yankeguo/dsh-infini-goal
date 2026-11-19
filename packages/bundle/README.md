@@ -102,7 +102,7 @@ loader row id 覆盖该行 `config`（DSH 的 patch 是整体替换该行 config
 - id: infini-goal
   config:
     defaultMinIntervalMs: 60000     # 默认最小触发间隔，1000 ~ 2592000000 ms（1s ~ 30d）
-    defaultQuietWindows: []         # 默认静默时段 [{ days: [1..7], start: 'HH:mm', end: 'HH:mm' }]
+    defaultQuietWindows: []         # 默认静默时段 [{ days: [1..7], start: 'HH:mm', end: 'HH:mm' 或 '24:00' }]
     timezone: Asia/Shanghai         # 默认静默时区，缺省取宿主系统时区
 
 - id: infini-goal-driver
@@ -134,7 +134,9 @@ bundle 里的 `infini-goal-tool` 行没有显式写 `blockedAfterConsecutiveRoun
 
 静默时段语法：分号分隔多条，每条 `[days ]HH:mm-HH:mm`；`days` 支持 `Mo-Fr`、`Sa,Su`、`1-5`
 （过滤窗口开始日），缺省=每天；`start` 含、`end` 不含，`end < start` 表示跨午夜；
-覆盖全部本地时间（永远无法触发）的配置会被拒绝；`none` 表示关闭。
+`end` 可写 `24:00`（开始日结束，即次日 00:00），历史配置的 `end=23:59` 会归一化为
+`24:00`，不会在 23:59 留出一分钟可触发空洞；覆盖全部本地时间（永远无法触发）的配置会被
+拒绝；`none` 表示关闭。
 
 ## 行为与限制
 

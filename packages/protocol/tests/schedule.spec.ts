@@ -13,6 +13,7 @@ import {
   zonedParts,
 } from '../src/schedule.ts'
 import type { InfiniGoalSettings, QuietWindow } from '../src/types.ts'
+import { parseQuietWindows } from '../src/quiet-windows.ts'
 
 const SHANGHAI = 'Asia/Shanghai'
 const NEW_YORK = 'America/New_York'
@@ -139,6 +140,51 @@ describe('quietEndAt / isQuietAt', () => {
     expect(quietEndAt(config, t('2026-03-02T06:00:00+08:00'))).toBeUndefined()
   })
 
+  it('closes the 23:59 gap with legacy Friday/Saturday back-to-back windows', () => {
+    // 2026-11-20 is a Friday. The legacy ends mean "until 23:59:00" and left a
+    // one-minute hole before Saturday 00:00; validation normalizes both to the
+    // 24:00 sentinel, so the whole stretch is quiet.
+    const config = settings(parseQuietWindows('Fr 18:00-23:59; Sa 00:00-23:59'))
+    for (const iso of [
+      '2026-11-20T23:59:00+08:00',
+      '2026-11-20T23:59:30+08:00',
+      '2026-11-20T23:59:59.999+08:00',
+    ]) {
+      expect(isQuietAt(config, t(iso))).toBe(true)
+      expect(quietEndAt(config, t(iso))).toBe(t('2026-11-21T00:00:00+08:00'))
+    }
+    expect(isQuietAt(config, t('2026-11-21T00:00:00+08:00'))).toBe(true)
+    expect(quietEndAt(config, t('2026-11-21T00:00:00+08:00'))).toBe(t('2026-11-22T00:00:00+08:00'))
+    expect(isQuietAt(config, t('2026-11-22T00:00:00+08:00'))).toBe(false)
+  })
+
+  it('treats a 00:00-24:00 window as one complete local day', () => {
+    // 2026-11-21 is a Saturday.
+    const config = settings([{ days: [6], start: '00:00', end: '24:00' }])
+    expect(isQuietAt(config, t('2026-11-21T00:00:00+08:00'))).toBe(true)
+    expect(quietEndAt(config, t('2026-11-21T12:00:00+08:00'))).toBe(t('2026-11-22T00:00:00+08:00'))
+    expect(isQuietAt(config, t('2026-11-22T00:00:00+08:00'))).toBe(false)
+  })
+
+  it('resolves a 24:00 end across a DST change', () => {
+    // America/New_York springs forward on 2026-03-08; that Sunday is 23 hours
+    // long, but 24:00 still means Monday 00:00 local (04:00Z).
+    const config: InfiniGoalSettings = {
+      minIntervalMs: 60_000,
+      timezone: NEW_YORK,
+      quietWindows: [{ days: [7], start: '00:00', end: '24:00' }],
+    }
+    expect(quietEndAt(config, t('2026-03-08T05:00:00Z'))).toBe(t('2026-03-09T04:00:00Z'))
+    expect(isQuietAt(config, t('2026-03-08T23:59:59-04:00'))).toBe(true)
+    expect(isQuietAt(config, t('2026-03-09T00:00:00-04:00'))).toBe(false)
+  })
+
+  it('resolves a 24:00 end across a year boundary', () => {
+    // 2026-12-31 is a Thursday.
+    const config = settings([{ days: [4], start: '22:00', end: '24:00' }])
+    expect(quietEndAt(config, t('2026-12-31T23:30:00+08:00'))).toBe(t('2027-01-01T00:00:00+08:00'))
+  })
+
   it('resolves an overnight window across a year boundary', () => {
     const config = settings([{ days: [], start: '22:00', end: '06:00' }])
     expect(quietEndAt(config, t('2026-12-31T23:00:00+08:00'))).toBe(t('2027-01-01T06:00:00+08:00'))
@@ -196,6 +242,24 @@ describe('nextTriggerAt', () => {
   it('pushes a candidate that lands inside a quiet window past its end', () => {
     const now = t('2026-03-02T10:00:00+08:00')
     expect(nextTriggerAt(settings([OFFICE_HOURS]), null, now)).toBe(t('2026-03-02T18:00:00+08:00'))
+  })
+
+  it('crosses the Friday 23:59 boundary into the Saturday window instead of triggering', () => {
+    // Legacy configs normalize to Fr 18:00-24:00 + Sa 00:00-24:00, so the
+    // earliest eligible instant is Sunday 2026-11-22 00:00 local.
+    const config = settings(parseQuietWindows('Fr 18:00-23:59; Sa 00:00-23:59'))
+    for (const iso of [
+      '2026-11-20T23:59:00+08:00',
+      '2026-11-20T23:59:30+08:00',
+      '2026-11-20T23:59:59.999+08:00',
+    ]) {
+      expect(nextTriggerAt(config, null, t(iso))).toBe(t('2026-11-22T00:00:00+08:00'))
+    }
+  })
+
+  it('throws when a single 00:00-24:00 window covers every local time', () => {
+    const config = settings([{ days: [], start: '00:00', end: '24:00' }])
+    expect(() => nextTriggerAt(config, null, t('2026-03-02T10:00:00+08:00'))).toThrow(RangeError)
   })
 
   it('keeps an interval target that already falls after the quiet window', () => {

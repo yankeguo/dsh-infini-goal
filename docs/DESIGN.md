@@ -52,7 +52,7 @@ pnpm workspace，`packages/*`：
 ## 3. 领域模型（`packages/protocol/src/types.ts`）
 
 ```ts
-interface QuietWindow { days: number[]; start: string; end: string }  // days: ISO 1=周一..7=周日，空=每天；HH:mm；end<start 跨午夜，start==end 拒绝
+interface QuietWindow { days: number[]; start: string; end: string }  // days: ISO 1=周一..7=周日，空=每天；start HH:mm(00:00-23:59)；end HH:mm 或 24:00（不含，24:00=次日 00:00）；end<start 跨午夜，start==end 拒绝
 interface InfiniGoalSettings { minIntervalMs: number; quietWindows: QuietWindow[]; timezone: string }
 interface InfiniGoalSnapshot extends InfiniGoalSettings {
   id: string; revision: number; objective: string
@@ -79,9 +79,14 @@ interface InfiniGoalProjection {         // Session projection key: 'infiniGoal'
     `'quiet-window'`；其余为 `'interval'`；
   - `quietUntil` 只在静默延后时非 `null`，且恒等于 `nextAt`（不是“当前所在静默窗口的结束”）；
   - `delayMs = max(0, nextAt - now)`。
-- 静默时段语义：单条窗口 `start` 含、`end` 不含；`end < start` 跨午夜；`start == end` 被
-  `validateQuietWindow` 拒绝；`days` 过滤的是窗口**开始日**；多条窗口取并集；
-  `none|off|空` 清空、`always|all` 被拒绝；数值星期区间必须升序（`Fr-Mo` 需写成 `Fr,Mo`）。
+- 静默时段语义：单条窗口 `start` 含、`end` 不含；`end` 可写 `24:00` 作为“开始日结束”
+  哨兵（解析为次日 00:00），`start` 仍限 `00:00-23:59`；历史配置的 `end=23:59` 在校验时
+  归一化为 `24:00`（包括持久化回放：fold 接受旧的 `23:59` 写法），否则 end 不含会在
+  23:59:00 到次日 00:00 之间留出一分钟可触发空洞；
+  `end < start` 跨午夜；`start == end` 被 `validateQuietWindow` 拒绝（`00:00-24:00` 是显式
+  全天形式，合法但会被调度器的全时段覆盖检查拒绝）；`days` 过滤的是窗口**开始日**；多条窗口
+  取并集；`none|off|空` 清空、`always|all` 被拒绝；数值星期区间必须升序（`Fr-Mo` 需写成
+  `Fr,Mo`）。
 - 静默时段覆盖全部本地时间时抛 `RangeError`，由服务端配置校验（创建 / 编辑 / 部署默认值）
   转为 `INFINI_GOAL_INVALID_SETTINGS` 拒绝。
 - DST（夏令时）：不存在的墙钟时间向前归一到 gap 结束；重复的墙钟时间中，静默窗口的
@@ -90,7 +95,8 @@ interface InfiniGoalProjection {         // Session projection key: 'infiniGoal'
   默认 `earliest`。
 - 协议 API 的硬化（0.1.0 之后）：`canonicalTimeZone` 拒绝 `±HH:MM` offset 形式（Host 与浏览器
   `Intl` 行为不同，只接受命名时区）；`weekdayOf`/`addDays` 对 0-99 年正确；`formatClockTime`
-  仅接受 0-1439 整数分钟；`parseDurationMs` 接受 token 间空白（`2h 15m`）并拒绝 `1m s`，
+  仅接受 0-1439 整数分钟；`parseClockTime` 仍是 0-1439，`parseQuietWindowEnd` 额外接受
+  `24:00` 哨兵并把历史 `23:59` 归一化为 1440；`parseDurationMs` 接受 token 间空白（`2h 15m`）并拒绝 `1m s`，
   溢出报 "duration is too large"；`parseWeekdays` 数值 token 必须是纯数字；
   `validateQuietWindows` 拒绝稀疏数组（array holes）；新增导出类型 `LocalOccurrence`。
 

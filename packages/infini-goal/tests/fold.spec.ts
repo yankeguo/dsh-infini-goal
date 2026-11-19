@@ -676,6 +676,22 @@ describe('decodeInfiniGoalChange: malformed payloads', () => {
     })
   })
 
+  it('normalizes a legacy 23:59 end while decoding an otherwise canonical snapshot', () => {
+    const legacy = record(validEdit())
+    goalRecord(legacy)['quietWindows'] = [
+      { days: [5], start: '18:00', end: '23:59' },
+      { days: [6], start: '00:00', end: '23:59' },
+    ]
+    expect(decodeInfiniGoalChange(legacy)).toMatchObject({
+      goal: {
+        quietWindows: [
+          { days: [5], start: '18:00', end: '24:00' },
+          { days: [6], start: '00:00', end: '24:00' },
+        ],
+      },
+    })
+  })
+
   const snapshotRejections: Array<[string, unknown, RegExp]> = (() => {
     const base = (): Record<string, unknown> => record(validEdit())
     const cases: Array<[string, (value: Record<string, unknown>) => void, RegExp]> = [
