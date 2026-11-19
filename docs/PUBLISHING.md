@@ -257,8 +257,9 @@ git push origin v0.3.0-rc.1
 CI（`.github/workflows/publish.yml`）依次执行：
 
 1. 解析 release tag（tag push 用 `github.ref_name`；手动触发用 `release_tag` 输入），并**从版本
-   推导 dist-tag**：版本含 `-`（`-rc.N`、`-alpha.N` 等）→ `next`，否则 → `latest`，同时写入
-   `RELEASE_TAG`、`RELEASE_VERSION`、`RELEASE_DIST_TAG` step output；
+   推导 dist-tag**：版本含 `-`（`-rc.N`、`-alpha.N` 等）→ `next`，否则 → `latest`，写入
+   `tag` / `version` / `dist_tag` 三个 step output；后续步骤再以 `RELEASE_TAG` /
+   `RELEASE_DIST_TAG` 环境变量消费；
 2. checkout 该 tag；
 3. **tag/版本/dist-tag 门禁**：`node scripts/stage-release.mjs --release-tag <tag> --tag <dist_tag> --gate`，
    tag 必须与 8 个包 + 根 `package.json` 的 `version` 完全一致，且 rc + `latest` 在此步就失败；
@@ -427,7 +428,7 @@ staged 发布把状态分成三段：**未 stage / 已 stage 未公开 / 已 app
 | stage 中途失败（某包报错） | **没有任何版本公开** | 先清理：`node scripts/promote-release.mjs --version <v> --reject`（2FA，逐包）；修复原因后用 `workflow_dispatch` + 同一 `release_tag` 重跑。若失败因包内容，必须升版本打新 tag |
 | stage 成功但内容有误（尚未 approve） | 无 | `--reject` 掉全部暂存版本（2FA），修复后升版本/新 tag 重新 stage。版本号在 reject 后可重新使用，但代码修正通常伴随版本升级 |
 | 暂存版本缺失/重复/tag 不一致 | 无 | `promote-release.mjs` 会在 approve 前失败；`--reject` 后重跑 CI stage |
-| rc 被暂存成 `latest`（尚未 approve） | 无 | dist-tag 不可变：`promote-release.mjs --version <v> --reject`（2FA），再以 `--tag next` 重新 stage（CI 推同一 tag 会按版本自动用 next）。若直接跑 approve，预检会在联网前失败 |
+| rc 被暂存成 `latest`（尚未 approve） | 无 | dist-tag 不可变：`promote-release.mjs --version <v> --reject`（2FA），再通过 `workflow_dispatch` 指定同一个既有 `release_tag` 重跑 CI，CI 会按版本自动用 `next`（tag 不能重推/移动）。若直接跑 approve，预检会在联网前失败 |
 | promote 预检报 `prerelease ... cannot be promoted with the latest dist-tag` | 无 | 说明命令显式传了 `--tag latest`；先 `--reject`，再用 `--tag next` 重新 stage 后 approve |
 | stage 时 OIDC/trust 报错 | 无 | 修 `.github/workflows/publish.yml` 或 `scripts/trusted-publishers.sh --migrate`，然后 dispatch 同一 tag 重跑（不移动 tag） |
 | approve 中途失败 | **已 approve 的包已公开**；其余仍私有 | 重跑 `promote-release.mjs --version <v>` 继续 approve 剩余暂存版本；若内容本身有误，reject 剩余包并升 patch 版本发布修正版（已公开版本无法安全撤回） |
