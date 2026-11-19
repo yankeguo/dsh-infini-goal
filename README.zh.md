@@ -318,7 +318,8 @@ Host 命令侧 pause / complete / block / clear 只 abort 正在运行的自动�
 
 ## 权限模型
 
-目标变更要么来自人类，要么来自“当前目标的自动轮次”，模型无法仅凭自己的判断创建或改写目标：
+目标变更来自人类、“当前目标的自动轮次”，或显式的 DevLead relay 信任例外；模型无法仅凭自己的
+判断创建或改写目标：
 
 - **人类**：`/infini-goal ...` 命令可以执行创建、编辑、暂停、恢复、完成、阻塞、清除，
   以及 `interval` / `quiet` / `timezone` 等节奏配置。
@@ -327,12 +328,14 @@ Host 命令侧 pause / complete / block / clear 只 abort 正在运行的自动�
     **合法形状的 DevLead relay prompt**；
   - `update_infini_goal` 的 `edit`、`config`、`resume` 同样需要直接人类消息或合法形状的
     DevLead relay prompt；
-  - DevLead relay prompt 指 source 恰好为
-    `{ kind: 'devlead', form: 'relay', senderSessionId: <非空字符串> }` 的 `user/message`。
-    DevLead `notice`、其他 form、缺失或类型错误的 sender id，以及未知 source 形状一律
-    fail closed。这是与独立安装的 DevLead 插件之间的软协议契约：只做结构校验，不引入包依赖；
-  - `pause`、`complete` 与 `blocked` 额外允许“当前目标的自动轮次”本身授权。pause 只停止
-    自主续跑，不会创建或改写目标，因此自动轮次可以不经过人类直接 pause；
+  - DevLead relay prompt 指 source 至少包含
+    `{ kind: 'devlead', form: 'relay', senderSessionId: <非空字符串> }` 这三个字段的
+    `user/message`；额外字段会被忽略，以保持前向兼容。DevLead `notice`、其他 form、缺失或
+    类型错误的 sender id，以及未知 source 形状一律 fail closed。这是与独立安装的 DevLead
+    插件之间的软协议契约：只做结构校验，不引入包依赖；
+  - `pause`、`complete` 与 `blocked` 同样接受上述 human authority，并额外允许“当前目标的
+    自动轮次”本身授权。pause 只停止自主续跑，不会创建或改写目标，因此自动轮次可以不经过
+    人类直接 pause；
   - 在自动轮次中报告 `blocked` 时，还要求已达到 `blockedAfterConsecutiveRounds`（默认 3）；
     直接人类或 DevLead relay 授权不受该阈值限制；
   - DevLead notice、定时任务提示、subagent 消息、agent-team 消息、其他 agent 消息和运行期
@@ -340,12 +343,14 @@ Host 命令侧 pause / complete / block / clear 只 abort 正在运行的自动�
   - 授权判定基于 Session 事件（open turn 内的 `user/message` source、root agent 身份），
     不采信模型的自我声明。
 
-由其他 agent、定时任务、DevLead notice 或运行期通知开启的 turn 不包含人类授权消息。这样的
-Session 即使可见文本看起来像用户请求，也不能 create/edit/config/resume 目标。这是有意的：
-这些 source 可以由调用方自行制造，信任它们等于把非人类消息变成目标授权。合法路径是 Session
-内的直接人类消息、合法形状的 DevLead relay prompt、`/infini-goal ...` 命令，或（对
-pause/complete/blocked）目标自己的自动轮次。DevLead relay 例外刻意保持狭窄：只接受上述精确
-形状且必须落在 runtime root 上，绝不扩展到 DevLead notice 或其他插件 source。
+除显式的 DevLead relay 信任例外外，由其他 agent、定时任务、DevLead notice 或运行期通知
+开启的 turn 不包含人类授权消息。没有合法形状的 relay prompt 时，这样的 Session 即使可见文本
+看起来像用户请求，也不能 create/edit/config/resume 目标。这是有意的：这些非 relay source
+可以由调用方自行制造，信任它们等于把非人类消息变成目标授权。合法路径是 Session 内的直接人类
+消息、合法形状的 DevLead relay prompt、`/infini-goal ...` 命令，或（对 pause/complete/blocked）
+目标自己的自动轮次。DevLead relay 是显式的 trusted-delegate 例外，而不是把所有非人类来源都
+当作可授权；它要求上述三个字段且必须落在 runtime root 上，额外字段忽略，绝不扩展到 DevLead
+notice 或其他插件 source。
 
 - **UI**：状态条按钮只是提交 `/infini-goal ...` 命令，没有独立 Remote API 或更高权限。
 - **安全边界**：插件运行在 Host 进程内，安装第三方插件等同于信任其代码；本套件不改变 DSH

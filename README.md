@@ -344,8 +344,8 @@ blocked goal clears `blockedReason`.
 
 ## Permission model
 
-Goal changes come either from a human or from "the current goal's automatic round"; the model cannot
-create or rewrite a goal on its own judgment:
+Goal changes come from a human, the current goal's automatic round, or the explicit DevLead relay
+trust exception; the model cannot create or rewrite a goal on its own judgment:
 
 - **Humans**: `/infini-goal ...` commands can create, edit, pause, resume, complete, block, and clear
   goals, as well as configure pacing via `interval` / `quiet` / `timezone`.
@@ -354,14 +354,15 @@ create or rewrite a goal on its own judgment:
     prompt** from the runtime root agent in the current turn;
   - `edit`, `config`, and `resume` on `update_infini_goal` likewise require a direct human message
     or a shape-valid DevLead relay prompt;
-  - a DevLead relay prompt is a `user/message` whose source is exactly
-    `{ kind: 'devlead', form: 'relay', senderSessionId: <non-blank string> }`. DevLead `notice`
-    messages, other forms, missing or ill-typed sender ids, and unknown source shapes fail closed.
-    This is a soft protocol contract with the separately installed DevLead plugin: it is checked
-    structurally and adds no package dependency;
-  - `pause`, `complete`, and `blocked` are additionally allowed under "the current goal's automatic
-    round" authorization. Pause only stops autonomy, so the goal's own round may use it without a
-    human; it does not create or rewrite the goal;
+  - a DevLead relay prompt is a `user/message` whose source requires the three fields
+    `{ kind: 'devlead', form: 'relay', senderSessionId: <non-blank string> }`; additional fields
+    are ignored for forward compatibility. DevLead `notice` messages, other forms, missing or
+    ill-typed sender ids, and unknown source shapes fail closed. This is a soft protocol contract
+    with the separately installed DevLead plugin: it is checked structurally and adds no package
+    dependency;
+  - `pause`, `complete`, and `blocked` accept the same human authority and are additionally allowed
+    under "the current goal's automatic round" authorization. Pause only stops autonomy, so the
+    goal's own round may use it without a human; it does not create or rewrite the goal;
   - reporting `blocked` in an automatic round also requires `blockedAfterConsecutiveRounds`
     (default 3) to be reached; direct human or DevLead relay authority may block immediately;
   - DevLead notices, scheduled prompts, subagent messages, agent-team messages, other agent
@@ -370,14 +371,15 @@ create or rewrite a goal on its own judgment:
   - authorization is determined from Session events (the `user/message` source inside the open turn,
     root-agent identity), not from the model's self-report.
 
-A turn opened by another agent, a scheduled task, a DevLead notice, or a runtime notice contains no
-human authority message. Such a Session therefore cannot create/edit/config/resume a goal even when
-the visible text reads like a user request. This is deliberate: those sources can be produced by the
-calling side, so trusting them would turn a non-human message into goal authority. The legal paths
-are a direct human message in the Session, a shape-valid DevLead relay prompt, the
-`/infini-goal ...` command, or — for pause/complete/blocked — the goal's own automatic round. The
-DevLead relay exception is intentionally narrow: it covers only the exact relay shape above on the
-runtime root, never DevLead notices or other plugin sources.
+Except for the explicit DevLead relay trust exception, a turn opened by another agent, a scheduled
+task, a DevLead notice, or a runtime notice contains no human authority message. Without a shape-valid
+relay prompt, such a Session cannot create/edit/config/resume a goal even when the visible text reads
+like a user request. This is deliberate: those non-relay sources can be produced by the calling
+side, so trusting them would turn a non-human message into goal authority. The legal paths are a
+direct human message in the Session, a shape-valid DevLead relay prompt, the `/infini-goal ...`
+command, or — for pause/complete/blocked — the goal's own automatic round. The relay exception is
+intentionally narrow: it requires the three fields above on the runtime root, ignores extra fields
+for forward compatibility, and never extends to DevLead notices or other plugin sources.
 
 - **UI**: status-bar buttons only submit `/infini-goal ...` commands; there is no independent Remote
   API or higher privilege.

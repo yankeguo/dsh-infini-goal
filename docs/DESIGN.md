@@ -285,8 +285,9 @@ Round prompt（模型可见）：`<infini_goal_round>` 块，包含 objective、
 - **human authority** 的判定：当前 runtime root agent 的 open turn 内存在以下任一
   `user/message`：
   1. **direct human**：host-attested 的 `source.kind === 'user'`；
-  2. **DevLead relay（delegated human）**：source 严格满足 `kind === 'devlead'`、
-     `form === 'relay'`、`senderSessionId` 为非空字符串。
+  2. **DevLead relay（delegated human）**：source 要求 `kind === 'devlead'`、
+     `form === 'relay'`、`senderSessionId` 为非空字符串这三个字段；额外字段忽略，保持前向
+     兼容。
   DevLead relay 是与独立安装的 DevLead 插件之间的软协议契约：本地字面量 + 结构校验，
   `packages/tool` 不 import 也不依赖 `@yankeguo/dsh-devlead*`；`form === 'notice'`、其他
   form、缺失 / 类型错误 / 空 sender id、未知 source 形状全部 fail closed。两种来源都要求
@@ -300,11 +301,13 @@ Round prompt（模型可见）：`<infini_goal_round>` 块，包含 objective、
 - DevLead relay 与 direct human 等价（delegated-human authority）：覆盖 create / edit /
   config / resume / pause / complete / blocked；blocked 不受 goal-round 阈值限制，也不注入
   自动轮次的收尾提示。
-- 由其他 agent、定时任务、DevLead notice 或运行期通知开启的 turn 没有 human authority
-  消息；这类 Session 即使文本看起来像用户请求，也不能 create/edit/config/resume。这是有意
-  的 fail-closed：这些 source 可由调用方自行制造，信任它们会把非人类消息变成目标授权。
-  合法路径是直接人类消息、合法 DevLead relay prompt、`/infini-goal ...` 命令，或（对
-  pause/complete/blocked）目标自己的自动轮次。
+- 除显式的 DevLead relay 信任例外外，由其他 agent、定时任务、DevLead notice 或运行期通知
+  开启的 turn 没有 human authority 消息；没有合法 relay prompt 时，这类 Session 即使文本
+  看起来像用户请求，也不能 create/edit/config/resume。这是有意的 fail-closed：这些非 relay
+  source 可由调用方自行制造，信任它们会把非人类消息变成目标授权。DevLead relay 是显式的
+  trusted-delegate 例外，而不是把所有非人类来源都当作可授权。合法路径是直接人类消息、合法
+  DevLead relay prompt、`/infini-goal ...` 命令，或（对 pause/complete/blocked）目标自己的
+  自动轮次。
 - `complete` / `blocked` 在 goal round 授权下会 `exec.deferContext(createUserMessage({ source:
   {kind:'tool-infini-goal', form:'notice', summary} }))` 注入收尾提示；human authority
   （direct human 或 delegated-human）授权不注入。

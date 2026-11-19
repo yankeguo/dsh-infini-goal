@@ -151,6 +151,15 @@ describe('devLeadRelaySourceOf', () => {
     expect(devLeadRelaySourceOf(messageSource(DEVLEAD_RELAY_SOURCE))).toEqual(DEVLEAD_RELAY_SOURCE)
   })
 
+  it('ignores additional source fields for forward compatibility', () => {
+    const extended = {
+      ...DEVLEAD_RELAY_SOURCE,
+      summary: 'delegated prompt',
+      future: { flag: true },
+    }
+    expect(devLeadRelaySourceOf(messageSource(extended))).toEqual(extended)
+  })
+
   it('fails closed for notices, other forms, missing sender ids, and malformed shapes', () => {
     const malformed = [
       DEVLEAD_NOTICE_SOURCE,
@@ -344,6 +353,17 @@ describe('completionAuthority', () => {
     const relay = executionFor(agent, [turnStartEvent(0), userEvent(1, DEVLEAD_RELAY_SOURCE)])
     expect(completionAuthority(fakeContext([agent]), relay, GOAL)).toEqual({ kind: 'delegated-human' })
     expect(() => completionAuthority(fakeContext([]), relay, GOAL)).toThrow(/complete and blocked require/)
+  })
+
+  it('prefers direct human over a relay prompt in the same turn', () => {
+    const agent = {} as Agent
+    const exec = executionFor(agent, [
+      turnStartEvent(0),
+      userEvent(1, DEVLEAD_RELAY_SOURCE),
+      userEvent(2, { kind: 'user' }),
+    ])
+    expect(completionAuthority(fakeContext([agent]), exec, GOAL)).toEqual({ kind: 'direct-human' })
+    expect(pauseAuthority(fakeContext([agent]), exec, GOAL)).toEqual({ kind: 'direct-human' })
   })
 
   it('rejects a call with neither authority and non-human sources', () => {

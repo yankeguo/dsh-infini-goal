@@ -116,7 +116,8 @@ loader row id 覆盖该行 `config`（DSH 的 patch 是整体替换该行 config
 ```
 
 bundle 里的 `infini-goal-tool` 行没有显式写 `blockedAfterConsecutiveRounds`，等价于默认值 `3`；
-`blockedAfterConsecutiveRounds` 只在“当前自动轮次”授权下生效，人类直接 block 不受此限。
+`blockedAfterConsecutiveRounds` 只在“当前自动轮次”授权下生效，human authority（direct human
+或 DevLead relay）的 block 不受此限。
 
 ## 使用
 

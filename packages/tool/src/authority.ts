@@ -51,8 +51,8 @@ export type InfiniGoalToolAuthority =
  *
  * This literal is duplicated locally on purpose: it is a soft protocol
  * contract with the separately distributed DevLead plugin, not an import or a
- * package dependency. Only the exact relay shape below is accepted; every
- * other DevLead form (notably `notice`) stays unauthorized.
+ * package dependency. Only the relay shape below is accepted; every other
+ * DevLead form (notably `notice`) stays unauthorized.
  */
 export const DEVLEAD_MESSAGE_KIND = 'devlead'
 
@@ -139,8 +139,9 @@ export function isDirectHumanSource(source: MessageSource): boolean {
 /**
  * Narrow one user-message source to a shape-valid DevLead relay prompt.
  *
- * Accepted shape (soft protocol contract, no DevLead import):
- * `{ kind: 'devlead', form: 'relay', senderSessionId: <non-blank string> }`.
+ * The source must carry these three fields (soft protocol contract, no DevLead
+ * import): `{ kind: 'devlead', form: 'relay', senderSessionId: <non-blank
+ * string> }`. Additional fields are ignored for forward compatibility.
  * DevLead notices, other forms, missing or ill-typed sender ids, and unknown
  * source shapes all return undefined, so callers fail closed.
  * @param source - user-message source from the session log.

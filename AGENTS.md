@@ -24,7 +24,8 @@ this file — it records only the invariants that are easy to break by accident.
 - The only plugin-specific message-source exception is a shape-validated DevLead
   relay: `kind === 'devlead'`, `form === 'relay'`, and a non-blank
   `senderSessionId` on a `user/message` in the runtime root's open turn, treated
-  as delegated human authority. `packages/tool/src` must not import any
+  as delegated human authority; extra source fields are ignored for forward
+  compatibility. `packages/tool/src` must not import any
   `@yankeguo/dsh-devlead*` package or depend on it; the literal and structural
   check are a soft protocol contract. DevLead notices, other forms, malformed
   shapes, and all other third-party sources stay unauthorized. A `grep` for

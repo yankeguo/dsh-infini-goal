@@ -146,7 +146,7 @@ interface Harness {
 }
 
 /** Boot the tool plugin against stub services with an empty session history. */
-function boot(config: Config = {}, options: { root?: boolean } = {}): Harness {
+function boot(config: Config = {}, options: { root?: boolean; openTurnStartSeq?: number } = {}): Harness {
   const goals = new FakeInfiniGoals()
   const definitions = new Map<string, CapturedTool>()
   const deferred: { source?: { kind: string; form?: string; summary?: string } }[] = []
@@ -162,7 +162,12 @@ function boot(config: Config = {}, options: { root?: boolean } = {}): Harness {
       get: () => agent,
       currentInitiator: () => agent,
       roots: () => options.root === false ? [] : [agent],
-      turnBoundaryOf: () => ({ openTurnStartSeq: 0, lastStepStartSeq: null, lastStepBoundary: null, lastTurn: 1 }),
+      turnBoundaryOf: () => ({
+        openTurnStartSeq: options.openTurnStartSeq ?? 0,
+        lastStepStartSeq: null,
+        lastStepBoundary: null,
+        lastTurn: 1,
+      }),
     },
     infiniGoals: goals,
     systemPrompt: {
@@ -263,6 +268,37 @@ interface ToolValue {
 /** Narrow one tool result to its canonical value. */
 function valueOf(result: unknown): ToolValue {
   return result as ToolValue
+}
+
+/** Seed one active revision-one goal without going through the create tool. */
+function seedGoal(harness: Harness): NonNullable<ToolValue['goal']> {
+  harness.goals.goal = {
+    id: 'goal-1',
+    revision: 1,
+    objective: 'Ship the docs',
+    phase: 'active',
+    roundsStarted: 0,
+    lastRoundAt: null,
+    minIntervalMs: 60_000,
+    quietWindows: [],
+    timezone: 'Asia/Shanghai',
+    createdAt: NOW,
+    updatedAt: NOW,
+  }
+  return harness.goals.goal
+}
+
+/** All six update actions with a valid ref for one seeded goal. */
+function updateCalls(goal: NonNullable<ToolValue['goal']>): Array<[string, Record<string, unknown>]> {
+  const ref = { goal_id: goal.id, revision: goal.revision }
+  return [
+    ['edit', { ...ref, action: 'edit', objective: 'Ship v2' }],
+    ['config', { ...ref, action: 'config', min_interval: '2m' }],
+    ['pause', { ...ref, action: 'pause' }],
+    ['resume', { ...ref, action: 'resume' }],
+    ['complete', { ...ref, action: 'complete' }],
+    ['blocked', { ...ref, action: 'blocked', blocked_reason: 'credentials expired' }],
+  ]
 }
 
 describe('infini-goal tool registration', () => {
@@ -376,6 +412,19 @@ describe('create_infini_goal', () => {
     devLeadRelayTurn(harness)
     const value = valueOf(await harness.call('create_infini_goal', { objective: 'Ship the docs' }))
     expect(value.goal?.objective).toBe('Ship the docs')
+    expect(value.goal?.phase).toBe('active')
+  })
+
+  it('ignores extra fields on a shape-valid DevLead relay source', async () => {
+    const harness = boot()
+    harness.setEvents([turnStartEvent(0), userMessageEvent(1, {
+      kind: 'devlead',
+      form: 'relay',
+      senderSessionId: 'lead-session',
+      summary: 'delegated prompt',
+      future: { flag: true },
+    })])
+    const value = valueOf(await harness.call('create_infini_goal', { objective: 'Ship the docs' }))
     expect(value.goal?.phase).toBe('active')
   })
 
@@ -518,6 +567,37 @@ describe('update_infini_goal', () => {
     expect(blocked.phase).toBe('blocked')
     expect(completed.phase).toBe('complete')
     expect(harness.deferred).toHaveLength(0)
+  })
+
+  it('rejects every update action for notice, malformed, subagent, and historical relay sources', async () => {
+    const relay = { kind: 'devlead', form: 'relay', senderSessionId: 'lead-session' }
+    const cases: Array<{ readonly label: string; readonly harness: Harness }> = []
+    for (const source of [
+      { kind: 'devlead', form: 'notice' },
+      { kind: 'devlead', form: 'notice', senderSessionId: 'lead-session' },
+      { kind: 'devlead', form: 'relay' },
+      { kind: 'devlead', form: 'relay', senderSessionId: 42 },
+      { kind: 'devlead', form: 'relay', senderSessionId: '' },
+      { kind: 'schedule' },
+    ]) {
+      const harness = boot()
+      harness.setEvents([turnStartEvent(0), userMessageEvent(1, source)])
+      cases.push({ label: `source ${JSON.stringify(source)}`, harness })
+    }
+    const subagent = boot({}, { root: false })
+    subagent.setEvents([turnStartEvent(0), userMessageEvent(1, relay)])
+    cases.push({ label: 'subagent relay', harness: subagent })
+    const historical = boot({}, { openTurnStartSeq: 1 })
+    historical.setEvents([userMessageEvent(0, relay), turnStartEvent(1)])
+    cases.push({ label: 'historical relay', harness: historical })
+
+    for (const { label, harness } of cases) {
+      const goal = seedGoal(harness)
+      for (const [action, args] of updateCalls(goal)) {
+        await expect(harness.call('update_infini_goal', args), `${label} / ${action}`)
+          .rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_AUTHORITY_REQUIRED' })
+      }
+    }
   })
 
   it('allows pause from the exact current goal round', async () => {
