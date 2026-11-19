@@ -130,6 +130,11 @@ change)`，常量 `INFINI_GOAL_RECORD_TYPE`），payload 形状不变，仍是 `
   已有内存日志），但**永远不会再 append**；`isInfiniGoalChangeEvent(event)` 同时识别两种表示。
 - `infiniGoal` projection 的 `stateVersion` 从 1 升到 2：旧 unit 折叠的行会整体丢弃重放，
   避免把“忽略 plugin 记录”的旧 checkpoint 前向应用。
+- quiet-window 的 `24:00` 修复把 `stateVersion` 从 2 升到 3：v2 checkpoint 里仍可能是
+  `end:'23:59'`，而新 fold 会归一化为 `24:00`，suffix replay 的 pause/resume/complete/block
+  会在 `requireSameDefinition` 处失败。version mismatch 让旧 checkpoint 行被丢弃并从 durable
+  log 重新 fold；`foldStateFromProjection` 另外对同版本 checkpoint 做防御性 quiet-window
+  归一化。
 - **0.1.0 旧日志不会自动迁移**：升级后如遇无法恢复的旧 Session，先退出 DSH，再运行
   `scripts/repair-session-log.mjs`（默认 dry-run；`--write` 只把 `infini-goal/change` 行改写为
   `plugin:infini-goal/change` + `ignorable: true`，保留时间戳备份，幂等，默认拒绝仍带
@@ -502,9 +507,9 @@ bundle 的 `package.json` 声明 `dsh.bundle.patch` 与 `dsh.bundle.listedByDefa
   因此 core 的 `zod` 被内联（`packages/infini-goal/lib/index.js` 约 580KB），其余 host 包只有几十 KB；
   换来的是 `@yankeguo` 各包共享同一份 core/protocol 实例（`instanceof InfiniGoalError` 等语义正确）。
 - **持久化表示变更（0.1.0 → 当前）**：从自定义 `infini-goal/change` Session 事件改为可忽略的
-  `plugin:infini-goal/change` 插件记录，payload 不变，`stateVersion` 升为 2；旧事件类型只为热重载
-  兼容而保留读取，不再写入。0.1.0 旧日志不会被自动迁移，需要 `scripts/repair-session-log.mjs`
-  （见 §4）。
+  `plugin:infini-goal/change` 插件记录，payload 不变，`stateVersion` 升为 2（后续 quiet-window
+  修复再升为 3，见 §4）；旧事件类型只为热重载兼容而保留读取，不再写入。0.1.0 旧日志不会被
+  自动迁移，需要 `scripts/repair-session-log.mjs`（见 §4）。
 - **DST 取舍**：静默窗口的开始取重复墙钟的较早一次、结束取较晚一次（保守包络），每年夏令时
   回拨日可能多覆盖约 1 小时；行为确定且两端一致，属已知实现取舍。
 - **配置**：`static Config` 未标注 `z<Config>`（`exactOptionalPropertyTypes` 下 Schemastery 嵌套

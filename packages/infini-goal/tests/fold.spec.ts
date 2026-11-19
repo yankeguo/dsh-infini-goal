@@ -811,6 +811,7 @@ describe('applyInfiniGoalProjection', () => {
 
   it('exposes the projection definition with the contract key and wire view', () => {
     expect(infiniGoalProjectionDefinition.key).toBe('infiniGoal')
+    expect(infiniGoalProjectionDefinition.stateVersion).toBe(3)
     expect(infiniGoalProjectionDefinition.init()).toEqual({ current: null, seenGoalIds: [], failure: null })
     const state = applyInfiniGoalProjection(initialState, changeEvent(0, createChange(T0), T0))
     expect(state.current?.goal.id).toBe('goal-1')
@@ -847,6 +848,73 @@ describe('applyInfiniGoalProjection', () => {
     // A failed projection keeps its first failure and stops folding further events.
     const later = applyInfiniGoalProjection(failed, changeEvent(3, clearChange('goal-1', 5, T0 + 3_000), T0 + 3_000))
     expect(later).toBe(failed)
+  })
+
+  it('normalizes a legacy 23:59 checkpoint before a suffix transition', () => {
+    const legacyWindows = [
+      { days: [5], start: '18:00', end: '23:59' },
+      { days: [6], start: '00:00', end: '23:59' },
+    ]
+    const windows = [
+      { days: [5], start: '18:00', end: '24:00' },
+      { days: [6], start: '00:00', end: '24:00' },
+    ]
+    const transitions = [
+      ['pause', 'active', 'paused'],
+      ['resume', 'paused', 'active'],
+      ['complete', 'active', 'complete'],
+      ['block', 'active', 'blocked'],
+    ] as const
+    for (const [operation, beforePhase, afterPhase] of transitions) {
+      const checkpoint: InfiniGoalProjectionState = {
+        current: {
+          goal: goal({ revision: 2, phase: beforePhase, quietWindows: legacyWindows }),
+          roundsStarted: 0,
+          lastRoundAt: null,
+          createdAt: T0,
+          updatedAt: T0 + 1_000,
+        },
+        seenGoalIds: ['goal-1'],
+        failure: null,
+      }
+      const blockedReason = afterPhase === 'blocked'
+        ? { code: 'max-tokens', message: 'budget exhausted' }
+        : undefined
+      const change = snapshotChange(
+        operation,
+        goal({ revision: 3, phase: afterPhase, quietWindows: windows, ...blockedReason === undefined ? {} : { blockedReason } }),
+        { updatedAt: T0 + 2_000 },
+      )
+      const event = changeEvent(2, change, T0 + 2_000)
+      const replayed = applyInfiniGoalProjection(checkpoint, event)
+      expect(replayed.failure, operation).toBeNull()
+      expect(replayed.current?.goal.phase, operation).toBe(afterPhase)
+      expect(replayed.current?.goal.quietWindows, operation).toEqual(windows)
+
+      const fullEvents = [changeEvent(0, createChange(T0, goal({ quietWindows: windows })), T0)]
+      if (operation === 'resume') {
+        // Reach the paused phase through a real pause event, not an edit.
+        fullEvents.push(changeEvent(
+          1,
+          snapshotChange('pause', goal({ revision: 2, phase: 'paused', quietWindows: windows }), {
+            updatedAt: T0 + 1_000,
+          }),
+          T0 + 1_000,
+        ))
+      } else {
+        fullEvents.push(changeEvent(
+          1,
+          snapshotChange('edit', goal({ revision: 2, phase: beforePhase, quietWindows: windows }), {
+            updatedAt: T0 + 1_000,
+          }),
+          T0 + 1_000,
+        ))
+      }
+      fullEvents.push(event)
+      let fullReplay = infiniGoalProjectionDefinition.init()
+      for (const fullEvent of fullEvents) fullReplay = applyInfiniGoalProjection(fullReplay, fullEvent)
+      expect(replayed, operation).toEqual(fullReplay)
+    }
   })
 
   it('drops the current value on a clear while retaining seen goal ids', () => {

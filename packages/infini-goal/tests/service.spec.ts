@@ -22,7 +22,7 @@ import {
   decodeInfiniGoalChange,
   foldInfiniGoal,
 } from '../src/index.ts'
-import type { InfiniGoalChange } from '../src/domain.ts'
+import type { InfiniGoalChange, InfiniGoalProjectionState } from '../src/domain.ts'
 
 /** One booted harness: registry, session, fake agent, and the loaded service. */
 interface Harness {
@@ -315,6 +315,98 @@ describe('InfiniGoalService durable representation', () => {
     expect(restored.checkpoint['infiniGoal']?.val).toEqual(checkpoint['infiniGoal']?.val)
   })
 
+  it('discards a v2 checkpoint whose quiet windows still end at 23:59', async () => {
+    const { ctx, agent, session } = await boot()
+    const created = ctx.infiniGoals.create(agent, { objective: 'checkpoint upgrade' })
+    const edited = ctx.infiniGoals.edit(agent, { id: created.id, revision: created.revision }, {
+      quietWindows: [
+        { days: [5], start: '18:00', end: '24:00' },
+        { days: [6], start: '00:00', end: '24:00' },
+      ],
+    })
+    ctx.infiniGoals.pause(agent, { id: edited.id, revision: edited.revision })
+    const live = ctx.sessionProjections.snapshot(session, ['infiniGoal']).values['infiniGoal']
+    const checkpoint = ctx.sessionProjections.checkpoint(session)
+    const row = checkpoint['infiniGoal']
+    if (row === undefined) throw new Error('expected a checkpoint row')
+    const val = row.val as InfiniGoalProjectionState
+    if (val.current === null) throw new Error('expected a current goal')
+    const legacyValue: InfiniGoalProjectionState = {
+      ...val,
+      current: {
+        ...val.current,
+        goal: {
+          ...val.current.goal,
+          quietWindows: [
+            { days: [5], start: '18:00', end: '23:59' },
+            { days: [6], start: '00:00', end: '23:59' },
+          ],
+        },
+      },
+    }
+    const legacyCheckpoint = { infiniGoal: { ver: 2, seq: row.seq, val: legacyValue } }
+    // A v2 row is unusable under stateVersion 3, so the read floor is 0 and the
+    // durable log refolds from the beginning.
+    expect(ctx.sessionProjections.restoreFloor(legacyCheckpoint)).toBe(0)
+    const restored = ctx.sessionProjections.restore(
+      legacyCheckpoint,
+      [...session.snapshotEvents()],
+      SessionLogOffset(0),
+      session.header,
+      session.inheritedEventCount,
+    )
+    expect(restored.snapshot.values['infiniGoal']).toEqual(live)
+    expect(restored.checkpoint['infiniGoal']?.ver).toBe(3)
+    expect(restored.checkpoint['infiniGoal']?.val).toMatchObject({
+      current: {
+        goal: {
+          quietWindows: [
+            { days: [5], start: '18:00', end: '24:00' },
+            { days: [6], start: '00:00', end: '24:00' },
+          ],
+        },
+      },
+    })
+  })
+
+  it('normalizes a legacy 23:59 end in a v3 checkpoint during suffix replay', async () => {
+    const { ctx, agent, session } = await boot()
+    const created = ctx.infiniGoals.create(agent, { objective: 'checkpoint suffix' })
+    const edited = ctx.infiniGoals.edit(agent, { id: created.id, revision: created.revision }, {
+      quietWindows: [{ days: [5], start: '18:00', end: '24:00' }],
+    })
+    const beforePause = ctx.sessionProjections.checkpoint(session)
+    const row = beforePause['infiniGoal']
+    if (row === undefined) throw new Error('expected a checkpoint row')
+    const val = row.val as InfiniGoalProjectionState
+    if (val.current === null) throw new Error('expected a current goal')
+    const legacyValue: InfiniGoalProjectionState = {
+      ...val,
+      current: {
+        ...val.current,
+        goal: {
+          ...val.current.goal,
+          quietWindows: [{ days: [5], start: '18:00', end: '23:59' }],
+        },
+      },
+    }
+    const legacyCheckpoint = { infiniGoal: { ver: 3, seq: row.seq, val: legacyValue } }
+    const paused = ctx.infiniGoals.pause(agent, { id: edited.id, revision: edited.revision })
+    expect(paused.phase).toBe('paused')
+    const live = ctx.sessionProjections.snapshot(session, ['infiniGoal']).values['infiniGoal']
+    const baseSeq = row.seq + 1
+    const suffix = session.snapshotEvents().filter(event => event.seq >= baseSeq)
+    const restored = ctx.sessionProjections.restore(
+      legacyCheckpoint,
+      suffix,
+      SessionLogOffset(baseSeq),
+      session.header,
+      session.inheritedEventCount,
+    )
+    expect(restored.snapshot.values['infiniGoal']).toEqual(live)
+    expect(restored.checkpoint['infiniGoal']?.ver).toBe(3)
+  })
+
   it('replays retired infini-goal/change events from a seeded session', async () => {
     const { ctx, agent, session } = await boot()
     const created = ctx.infiniGoals.create(agent, { objective: 'legacy continuity' })
@@ -384,6 +476,41 @@ describe('InfiniGoalService mutation coverage', () => {
       'INFINI_GOAL_STALE_REVISION',
     )
     expect(ctx.infiniGoals.get(agent)).toMatchObject({ revision: 1, objective: 'errors' })
+  })
+
+  it('accepts 24:00 default quiet windows and normalizes legacy 23:59 defaults', async () => {
+    const { ctx, agent } = await boot({
+      defaultQuietWindows: [
+        { days: [5], start: '18:00', end: '23:59' },
+        { days: [6], start: '00:00', end: '24:00' },
+      ],
+    })
+    const created = ctx.infiniGoals.create(agent, { objective: 'defaults' })
+    expect(created.quietWindows).toEqual([
+      { days: [5], start: '18:00', end: '24:00' },
+      { days: [6], start: '00:00', end: '24:00' },
+    ])
+  })
+
+  it('rejects a single 00:00-24:00 window as unschedulable', async () => {
+    const { ctx, agent } = await boot()
+    const allDay = [{ days: [], start: '00:00', end: '24:00' }]
+    expectCode(
+      () => ctx.infiniGoals.create(agent, { objective: 'all day', quietWindows: allDay }),
+      'INFINI_GOAL_INVALID_SETTINGS',
+    )
+    const created = ctx.infiniGoals.create(agent, { objective: 'still valid' })
+    expectCode(
+      () => ctx.infiniGoals.edit(
+        agent,
+        { id: created.id, revision: created.revision },
+        { quietWindows: allDay },
+      ),
+      'INFINI_GOAL_INVALID_SETTINGS',
+    )
+    expect(ctx.infiniGoals.get(agent)?.quietWindows).toEqual([
+      { days: [1, 2, 3, 4, 5], start: '09:00', end: '18:00' },
+    ])
   })
 
   it('completes from the paused and blocked phases', async () => {

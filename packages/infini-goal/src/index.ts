@@ -29,6 +29,7 @@ import {
   INFINI_GOAL_EVENT_TYPE,
   INFINI_GOAL_PROJECTION_KEY,
   planTrigger,
+  validateQuietWindows,
 } from '@yankeguo/dsh-infini-goal-protocol'
 import type {
   InfiniGoalBlockReason,
@@ -148,8 +149,14 @@ const infiniGoalProjectionStateSchema: ZodType<InfiniGoalProjectionState> = zod.
 
 /** Build strict fold state from one checkpoint-safe projection state. */
 function foldStateFromProjection(state: InfiniGoalProjectionState): InfiniGoalFoldState {
+  const goal = state.current?.goal
   return {
-    goal: state.current?.goal,
+    // A checkpoint row is only a fold shortcut. Normalize its quiet windows so a
+    // row written before the `24:00` end sentinel (including a defensive v3 row
+    // carrying a legacy `23:59`) still agrees with an event folded by this build.
+    goal: goal === undefined
+      ? undefined
+      : { ...goal, quietWindows: validateQuietWindows(goal.quietWindows) },
     roundsStarted: state.current?.roundsStarted ?? 0,
     lastRoundAt: state.current?.lastRoundAt ?? null,
     createdAt: state.current?.createdAt,
@@ -198,8 +205,8 @@ export function applyInfiniGoalProjection(
   if (state.failure !== null) return state
   if (!isInfiniGoalChangeEvent(event)
     && (event.type !== 'user/message' || event.data.source.kind !== 'infini-goal')) return state
-  const folded = foldStateFromProjection(state)
   try {
+    const folded = foldStateFromProjection(state)
     applyInfiniGoalEvent(folded, event)
     return projectionFromFoldState(folded)
   } catch (error: unknown) {
@@ -219,7 +226,11 @@ export const infiniGoalProjectionDefinition = {
   // 2: the durable representation changed from a required Session event to an
   // ignorable plugin record, so a row folded by a unit that ignored those
   // records must be discarded instead of forward-applied.
-  stateVersion: 2,
+  // 3: quiet-window end semantics changed (`23:59` normalizes to the `24:00`
+  // end-of-day sentinel). A v2 row would make a pause/resume/complete/blocked
+  // suffix replay disagree with a full replay, so discard it and refold the
+  // durable log.
+  stateVersion: 3,
 } satisfies ProjectionDefinition<'infiniGoal', InfiniGoalProjectionState>
 
 /**
