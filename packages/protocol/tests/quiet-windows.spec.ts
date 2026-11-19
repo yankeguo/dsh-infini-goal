@@ -92,6 +92,14 @@ describe('quiet window text form', () => {
     expect(formatQuietWindows(windows)).toBe('Fr 18:00-24:00; Sa 00:00-24:00')
   })
 
+  it('round-trips canonical 24:00 text through format and parse', () => {
+    const windows = [{ days: [5], start: '18:00', end: '24:00' }]
+    const formatted = formatQuietWindows(windows)
+    expect(formatted).toBe('Fr 18:00-24:00')
+    expect(parseQuietWindows(formatted)).toEqual(windows)
+    expect(formatQuietWindows(parseQuietWindows('Fr 18:00-23:59'))).toBe(formatted)
+  })
+
   it('accepts 24:00 only as an end and keeps equal clocks invalid', () => {
     expect(parseQuietWindows('00:00-24:00'))
       .toEqual([{ days: [], start: '00:00', end: '24:00' }])
@@ -103,7 +111,7 @@ describe('quiet window text form', () => {
     expect(() => parseQuietWindows('23:59-23:59')).toThrow(/must differ/)
   })
 
-  it('rejects malformed entries and whole-day windows', () => {
+  it('rejects malformed entries and zero-length windows', () => {
     expect(() => parseQuietWindows('09:00')).toThrow()
     expect(() => parseQuietWindows('09:00-09:00')).toThrow()
     expect(() => parseQuietWindows('always')).toThrow()

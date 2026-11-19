@@ -46,9 +46,9 @@ export interface InfiniGoalBlockReason {
  *
  * `start` is inclusive and `end` exclusive; `end < start` crosses midnight into
  * the next local day and the weekday filter applies to the day the window
- * starts on. `end === start` is invalid: a zero-length or whole-day window is
- * never what the caller means, and quiet windows that cover every local time
- * are rejected by the scheduler.
+ * starts on. `end === start` is invalid: a zero-length window is never what the
+ * caller means. `00:00-24:00` is the explicit whole-day form; windows that
+ * together cover every local time are rejected by the scheduler.
  */
 export interface QuietWindow {
   /** ISO weekday numbers the window starts on (1 = Monday … 7 = Sunday); empty means every day. */

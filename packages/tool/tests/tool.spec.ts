@@ -469,6 +469,19 @@ describe('create_infini_goal', () => {
     })
   })
 
+  it('accepts 24:00 and normalizes legacy 23:59 quiet-window ends', async () => {
+    const harness = boot()
+    humanTurn(harness)
+    await harness.call('create_infini_goal', {
+      objective: 'Ship the docs',
+      quiet_windows: 'Fr 18:00-23:59; Sa 00:00-24:00',
+    })
+    expect(harness.goals.goal?.quietWindows).toEqual([
+      { days: [5], start: '18:00', end: '24:00' },
+      { days: [6], start: '00:00', end: '24:00' },
+    ])
+  })
+
   it('rejects malformed pacing text as an actionable tool error', async () => {
     const harness = boot()
     humanTurn(harness)
@@ -598,6 +611,25 @@ describe('update_infini_goal', () => {
           .rejects.toMatchObject({ code: 'INFINI_GOAL_TOOL_AUTHORITY_REQUIRED' })
       }
     }
+  })
+
+  it('accepts 24:00 in update quiet_windows', async () => {
+    const harness = boot()
+    humanTurn(harness)
+    const created = valueOf(await harness.call('create_infini_goal', { objective: 'Ship the docs' }))
+    const goal = created.goal
+    if (goal === null) throw new Error('expected a goal')
+    humanTurn(harness)
+    const configured = valueOf(await harness.call('update_infini_goal', {
+      goal_id: goal.id,
+      revision: goal.revision,
+      action: 'config',
+      quiet_windows: 'Fr 18:00-24:00',
+    }))
+    expect(configured.goal?.phase).toBe('active')
+    expect(harness.goals.goal?.quietWindows).toEqual([
+      { days: [5], start: '18:00', end: '24:00' },
+    ])
   })
 
   it('allows pause from the exact current goal round', async () => {

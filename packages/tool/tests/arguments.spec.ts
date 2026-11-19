@@ -48,6 +48,10 @@ describe('parseQuietWindowsArg', () => {
       .toEqual([{ days: [1, 2, 3, 4, 5], start: '09:00', end: '18:00' }])
     expect(parseQuietWindowsArg('09:00-12:00'))
       .toEqual([{ days: [], start: '09:00', end: '12:00' }])
+    expect(parseQuietWindowsArg('Fr 18:00-24:00'))
+      .toEqual([{ days: [5], start: '18:00', end: '24:00' }])
+    expect(parseQuietWindowsArg('Fr 18:00-23:59'))
+      .toEqual([{ days: [5], start: '18:00', end: '24:00' }])
     expect(parseQuietWindowsArg('none')).toEqual([])
   })
 

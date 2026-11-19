@@ -19,6 +19,7 @@ const SHANGHAI = 'Asia/Shanghai'
 const NEW_YORK = 'America/New_York'
 const BERLIN = 'Europe/Berlin'
 const LORD_HOWE = 'Australia/Lord_Howe'
+const SANTIAGO = 'America/Santiago'
 
 /** Build settings with the Shanghai zone and one-minute pacing. */
 function settings(quietWindows: QuietWindow[] = [], minIntervalMs = 60_000): InfiniGoalSettings {
@@ -183,6 +184,49 @@ describe('quietEndAt / isQuietAt', () => {
     // 2026-12-31 is a Thursday.
     const config = settings([{ days: [4], start: '22:00', end: '24:00' }])
     expect(quietEndAt(config, t('2026-12-31T23:30:00+08:00'))).toBe(t('2027-01-01T00:00:00+08:00'))
+  })
+
+  it('covers a 25-hour fall-back day with a 24:00 end', () => {
+    // America/New_York falls back on 2026-11-01, so that Sunday lasts 25 hours.
+    const config: InfiniGoalSettings = {
+      minIntervalMs: 60_000,
+      timezone: NEW_YORK,
+      quietWindows: [{ days: [7], start: '00:00', end: '24:00' }],
+    }
+    expect(quietEndAt(config, t('2026-11-01T04:00:00Z'))).toBe(t('2026-11-02T05:00:00Z'))
+    expect(isQuietAt(config, t('2026-11-01T23:59:59-05:00'))).toBe(true)
+    expect(isQuietAt(config, t('2026-11-02T00:00:00-05:00'))).toBe(false)
+  })
+
+  it('resolves a midnight DST gap to 01:00 for a 24:00 window', () => {
+    // America/Santiago springs forward at 2026-09-06 00:00 local, so the day
+    // starts at 01:00. A 00:00-24:00 window therefore runs 01:00 -> next 00:00.
+    const config: InfiniGoalSettings = {
+      minIntervalMs: 60_000,
+      timezone: SANTIAGO,
+      quietWindows: [{ days: [7], start: '00:00', end: '24:00' }],
+    }
+    expect(formatZonedClock(SANTIAGO, resolveLocalInstant(
+      SANTIAGO,
+      { year: 2026, month: 9, day: 6 },
+      0,
+    ))).toBe('01:00')
+    expect(quietEndAt(config, t('2026-09-06T04:00:00Z'))).toBe(t('2026-09-07T03:00:00Z'))
+  })
+
+  it('does not extend a previous-day 24:00 window into the next day', () => {
+    // 2026-11-20 is a Friday; Saturday 00:00 is outside that Friday window.
+    const config = settings([{ days: [5], start: '18:00', end: '24:00' }])
+    expect(quietEndAt(config, t('2026-11-21T00:00:00+08:00'))).toBeUndefined()
+    expect(nextTriggerAt(config, null, t('2026-11-21T00:00:00+08:00')))
+      .toBe(t('2026-11-21T00:00:00+08:00'))
+  })
+
+  it('supports a one-minute 23:59-24:00 window', () => {
+    const config = settings([{ days: [5], start: '23:59', end: '24:00' }])
+    expect(isQuietAt(config, t('2026-11-20T23:58:59+08:00'))).toBe(false)
+    expect(quietEndAt(config, t('2026-11-20T23:59:00+08:00'))).toBe(t('2026-11-21T00:00:00+08:00'))
+    expect(isQuietAt(config, t('2026-11-21T00:00:00+08:00'))).toBe(false)
   })
 
   it('resolves an overnight window across a year boundary', () => {

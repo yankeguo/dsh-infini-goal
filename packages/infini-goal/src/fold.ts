@@ -146,7 +146,7 @@ function decodeQuietWindow(value: unknown, field: string): QuietWindow {
   // it to the canonical `24:00` sentinel.
   const legacyEndOfDay = value['end'] === '23:59' && normalized.end === '24:00'
   if (!startIsCanonical || (!endIsCanonical && !legacyEndOfDay)) {
-    throw new Error(`${field} start and end must be canonical HH:mm clock times`)
+    throw new Error(`${field} start and end must be canonical HH:mm clock times (end may be 24:00)`)
   }
   return normalized
 }
