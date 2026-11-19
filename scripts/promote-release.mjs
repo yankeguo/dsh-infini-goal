@@ -15,8 +15,14 @@
  *     staging run: versions can only be staged again once rejected);
  *   - the default action approves every stage id in dependency order (`npm
  *     stage approve`, which prompts for a one-time password per package),
- *     verifies that the versions are now public, and creates the GitHub Release
- *     from `docs/releases/v<version>.md`;
+ *     verifies that the versions are now public, proves a prerelease did not
+ *     move `latest`, and creates or updates the GitHub Release from
+ *     `docs/releases/v<version>.md`;
+ *   - a prerelease version (-rc.N etc.) is refused when staged with the
+ *     `latest` dist-tag, is marked `--prerelease --latest=false` on the GitHub
+ *     Release, and its packages are checked so `dist-tags.latest` does not
+ *     point at it; a stable version is marked `--prerelease=false` (also when
+ *     editing an existing release, which corrects a stale flag);
  *   - `--dry-run` shows every command without approving anything.
  *
  * Usage:
@@ -64,7 +70,8 @@ function printUsage() {
     'Options:',
     '  --version <version>     release version to promote, e.g. 0.2.0 (required)',
     '  --release-tag <tag>     GitHub Release tag (default: v<version>)',
-    '  --tag <dist-tag>        dist-tag the staged versions must carry (default: latest, next for a prerelease)',
+    '  --tag <dist-tag>        dist-tag the staged versions must carry (default: latest, next for a prerelease;',
+    '                          a prerelease with latest is refused)',
     '  --list-only             list and verify the staged uploads, do not approve',
     '  --dry-run               print the approve/release commands, change nothing',
     '  --reject                reject the staged uploads of this version instead of approving',
@@ -443,40 +450,125 @@ function verifyPublished(plan, version) {
 }
 
 /**
- * Create the GitHub Release from the committed release notes.
+ * Whether the GitHub Release for a tag already exists.
+ * @param {string} releaseTag release tag
+ * @returns {boolean} true when `gh release view` finds it
+ */
+function githubReleaseExists(releaseTag) {
+  const result = capture('gh', ['release', 'view', releaseTag])
+  if (result.status === 0) return true
+  const detail = result.stderr.trim() || result.stdout.trim()
+  if (/release not found|HTTP 404|not found/iu.test(detail)) return false
+  throw new Error(
+    `could not determine whether the GitHub Release ${releaseTag} exists:`
+    + ` ${detail.split('\n')[0] ?? 'gh failed'}`
+    + '\nAll packages are published; fix gh auth/network and re-run this script to finish the release.',
+  )
+}
+
+/**
+ * Create or update the GitHub Release from the committed release notes.
+ *
+ * Both commands pass `--verify-tag`, so a missing tag can never create one
+ * from the default branch. A prerelease version is marked `--prerelease
+ * --latest=false`; a stable version `--prerelease=false` (which also corrects a
+ * stale flag when editing). A missing notes file falls back to generated notes
+ * on create and keeps the existing notes on edit.
  * @param {{ rootDir: string, version: string }} plan release plan
  * @param {string} releaseTag release tag, e.g. `v0.2.0`
- * @param {boolean} dryRun print the command only
+ * @param {boolean} dryRun print the commands only
+ * @param {boolean} [releaseExists] whether the release already exists (unknown during a dry run)
  * @returns {number | null} the gh exit status, `null` when gh is unavailable or the command is only printed
  */
-function createGithubRelease(plan, releaseTag, dryRun) {
+function createGithubRelease(plan, releaseTag, dryRun, releaseExists = false) {
   const notes = releaseNotesPath(plan.rootDir, plan.version)
-  const argumentsList = ['release', 'create', releaseTag, '--title', releaseTag]
   const printable = existsSync(notes)
-  if (printable) {
-    argumentsList.push('--notes-file', notes)
-  } else {
-    argumentsList.push('--generate-notes')
+  const flags = plan.version.includes('-')
+    ? ['--prerelease', '--latest=false']
+    : ['--prerelease=false']
+  const argumentsFor = action => {
+    const argumentsList = ['release', action, releaseTag, '--title', releaseTag]
+    if (printable) {
+      argumentsList.push('--notes-file', notes)
+    } else if (action === 'create') {
+      argumentsList.push('--generate-notes')
+    }
+    argumentsList.push('--verify-tag', ...flags)
+    return argumentsList
   }
-  console.log(`\nGitHub Release: ${releaseTag}${printable ? ` (notes: docs/releases/v${plan.version}.md)` : ' (generated notes)'}`)
   if (dryRun) {
-    console.log(`  gh ${argumentsList.join(' ')}`)
+    console.log('\nGitHub Release:')
+    console.log(`  gh ${argumentsFor('create').join(' ')}    # when absent${printable ? '' : ' (generated notes)'}`)
+    console.log(`  gh ${argumentsFor('edit').join(' ')}      # when present`)
     return null
   }
+  const action = releaseExists ? 'edit' : 'create'
+  const argumentsList = argumentsFor(action)
+  const notesNote = printable
+    ? `notes: docs/releases/v${plan.version}.md`
+    : action === 'create' ? 'generated notes' : 'existing notes kept'
+  console.log(`\nGitHub Release: ${releaseTag} (${action}; ${notesNote})`)
   const result = capture('gh', argumentsList)
   if (result.error !== undefined) {
     console.error(`could not run gh: ${messageOf(result.error)}`)
-    console.error(`create the release manually after installing gh: gh ${argumentsList.join(' ')}`)
+    console.error(`create or update the release manually after installing gh: gh ${argumentsList.join(' ')}`)
     return null
   }
   if (result.status !== 0) {
-    console.error(`gh release create failed: ${(result.stderr.trim() || result.stdout.trim()).split('\n')[0] ?? ''}`)
-    console.error(`the packages are published; create the release manually: gh ${argumentsList.join(' ')}`)
+    console.error(`gh release ${action} failed: ${(result.stderr.trim() || result.stdout.trim()).split('\n')[0] ?? ''}`)
+    console.error(`the packages are published; create or update the release manually: gh ${argumentsList.join(' ')}`)
     return result.status
   }
   const url = result.stdout.trim().split('\n').find(line => line.startsWith('http')) ?? ''
-  console.log(`  created${url === '' ? '' : `: ${url}`}`)
+  console.log(`  ${action === 'create' ? 'created' : 'updated'}${url === '' ? '' : `: ${url}`}`)
   return 0
+}
+
+/**
+ * After approving a prerelease, prove the registry's `latest` dist-tag does not
+ * point at it. Approval publishes under the dist-tag recorded at stage time and
+ * the preflight already refuses a prerelease staged with `latest`, so this is a
+ * belt-and-braces check against registry-side surprises. A violation is fatal
+ * and prints the repair command (the packages are already public at this point).
+ * @param {{ order: Array<{ name: string }> }} plan release plan
+ * @param {string} version prerelease version
+ * @returns {void}
+ */
+function verifyPrereleaseDistTags(plan, version) {
+  console.log('\nverifying that dist-tags.latest does not point at this prerelease:')
+  const failures = []
+  for (const pkg of plan.order) {
+    const result = capture('npm', ['view', pkg.name, 'dist-tags', '--json'])
+    if (result.status !== 0) {
+      const detail = npmFailure(result)
+      failures.push(`${pkg.name}: could not read dist-tags (${detail})`)
+      console.log(`  FAIL ${pkg.name}: ${detail}`)
+      continue
+    }
+    let tags
+    try {
+      tags = JSON.parse(result.stdout)
+    } catch {
+      failures.push(`${pkg.name}: npm view dist-tags did not print JSON`)
+      console.log(`  FAIL ${pkg.name}: npm view dist-tags did not print JSON`)
+      continue
+    }
+    if (tags?.latest === version) {
+      failures.push(`${pkg.name}: latest points at ${version}`)
+      console.log(`  FAIL ${pkg.name}: dist-tags.latest points at ${version}`)
+      continue
+    }
+    console.log(`  OK   ${pkg.name}: latest ${typeof tags?.latest === 'string' ? tags.latest : '(unset)'}`)
+  }
+  if (failures.length > 0) {
+    throw new Error(
+      `the latest dist-tag check failed for prerelease ${version}:\n${failures.map(failure => `  - ${failure}`).join('\n')}\n`
+      + 'All packages of this version are already public. Repair latest immediately by pointing it back'
+      + ' at the intended stable version:\n'
+      + '  npm dist-tag add <package>@<stable-version> latest\n'
+      + 'Then re-run this script to finish the GitHub Release step.',
+    )
+  }
 }
 
 /**
@@ -511,6 +603,18 @@ async function main() {
   // A prerelease release is staged with `next` by default, never `latest`.
   const distTag = options.distTag ?? (plan.version.includes('-') ? 'next' : 'latest')
   console.log(`dist-tag: ${distTag}`)
+  // Hard preflight, before any registry read: approving a prerelease staged
+  // with latest would make it the default install. `--reject` is the cleanup
+  // path and stays available regardless of the (irrelevant) tag option.
+  if (!options.reject && plan.version.includes('-') && distTag === 'latest') {
+    throw new Error(
+      `prerelease ${plan.version} cannot be promoted with the latest dist-tag: approval would make it`
+      + ' the default install. Reject the staged records and stage again with next:\n'
+      + `  node scripts/promote-release.mjs --version ${plan.version} --reject\n`
+      + `  node scripts/stage-release.mjs --version ${plan.version} --release-tag v${plan.version} --tag next\n`
+      + 'Nothing was approved.',
+    )
+  }
   const uploads = readStagedUploads(plan.version)
 
   // Rejecting only needs the valid staged uploads; completeness and approval
@@ -568,11 +672,12 @@ async function main() {
 
   if (options.listOnly) {
     if (byName.size === 0) {
+      const releaseFlags = plan.version.includes('-') ? ' --prerelease --latest=false' : ' --prerelease=false'
       console.log([
         '',
         `all ${plan.order.length} packages of ${plan.version} are already public.`,
         'next: re-run without --list-only to verify and create the GitHub Release, or create it manually:',
-        `  gh release create ${releaseTag} --title ${releaseTag} --notes-file docs/releases/v${plan.version}.md`,
+        `  gh release create ${releaseTag} --title ${releaseTag} --notes-file docs/releases/v${plan.version}.md --verify-tag${releaseFlags}`,
       ].join('\n'))
       return
     }
@@ -626,11 +731,14 @@ async function main() {
     return
   }
 
+  if (plan.version.includes('-')) verifyPrereleaseDistTags(plan, plan.version)
+
   if (options.noGithubRelease) {
     console.log(`\nreleased ${plan.version} to npm; GitHub Release skipped (--no-github-release).`)
     return
   }
-  const releaseStatus = createGithubRelease(plan, releaseTag, false)
+  const releaseExists = githubReleaseExists(releaseTag)
+  const releaseStatus = createGithubRelease(plan, releaseTag, false, releaseExists)
   if (releaseStatus !== 0) {
     process.exitCode = 1
     return

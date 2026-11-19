@@ -52,7 +52,8 @@ function printUsage() {
     'Options:',
     '  --version <version>     expected package version (default: root package.json version)',
     '  --release-tag <tag>     v<version> tag to validate against the package versions',
-    '  --tag <dist-tag>        dist-tag for the staged versions (default: latest, next for a prerelease)',
+    '  --tag <dist-tag>        dist-tag for the staged versions (default: latest, next for a prerelease;',
+    '                          a prerelease with latest is refused)',
     '  --provenance            attach a provenance attestation (CI; ignored with --dry-run)',
     '  --no-git-checks         skip pnpm\'s git checks (CI checks out the tag detached)',
     '  --dry-run               pack every package with pnpm --dry-run; reveal what would be staged',
@@ -261,20 +262,27 @@ function main() {
   console.log(`release plan: v${plan.version} (${plan.order.length} packages, dependency order)`)
   for (const line of describePlan(plan)) console.log(`  ${line}`)
   if (options.releaseTag !== undefined) console.log(`release tag: ${options.releaseTag} matches every package version`)
-  // A prerelease must never move `latest`: default it to the `next` dist-tag.
-  const distTag = options.distTag ?? (plan.version.includes('-') ? 'next' : 'latest')
+  // A prerelease must never move `latest`: default it to the `next` dist-tag,
+  // and refuse an explicit `latest` before any package content is checked or
+  // uploaded. Approval publishes under the tag recorded here, so staging a
+  // prerelease as latest would silently make it the default install.
+  const isPrerelease = plan.version.includes('-')
+  const distTag = options.distTag ?? (isPrerelease ? 'next' : 'latest')
   console.log(`dist-tag: ${distTag}`)
+  if (isPrerelease && distTag === 'latest') {
+    throw new Error(
+      `${plan.version} is a prerelease; refusing --tag latest because approval would move the "latest"`
+      + ' dist-tag onto a prerelease and make it the default install.'
+      + `\nUse --tag next (or another non-latest tag) instead:\n`
+      + `  node scripts/stage-release.mjs --version ${plan.version} --release-tag v${plan.version} --tag next\n`
+      + 'Nothing was staged.',
+    )
+  }
   if (options.gate) {
     console.log('\nversion/tag gate OK (--gate); the staging run re-validates build artifacts')
     return
   }
   assertPackageContents(plan)
-  if (plan.version.includes('-') && distTag === 'latest') {
-    console.warn(
-      `warning: ${plan.version} is a prerelease but --tag latest was requested;`
-      + ' approval would move the "latest" dist-tag onto a prerelease version.',
-    )
-  }
   if (options.check) {
     console.log('\nrelease plan OK; nothing was staged (--check)')
     return
@@ -309,6 +317,9 @@ function main() {
     `\n${verb} ${staged.length}/${plan.order.length} package(s) at ${plan.version} with dist-tag ${distTag}.`,
     ...staged.map(pkg => `  - ${pkg.name}@${plan.version} (${verb})`),
   ]
+  if (isPrerelease) {
+    summary.push('This is a prerelease: approve it as usual, and the GitHub Release is marked --prerelease --latest=false.')
+  }
   if (options.dryRun) {
     summary.push('', `dry run: nothing was uploaded; re-run with --no-git-checks (CI does) to stage for real.`)
   } else {
@@ -326,6 +337,9 @@ function main() {
     '',
     `${staged.length}/${plan.order.length} packages ${verb} with dist-tag \`${distTag}\`.`,
     '',
+    ...isPrerelease
+      ? ['Prerelease: the GitHub Release is marked `--prerelease --latest=false` and can never become Latest.', '']
+      : [],
     '| # | package | version |',
     '| --- | --- | --- |',
     ...staged.map((pkg, index) => `| ${index + 1} | \`${pkg.name}\` | \`${plan.version}\` |`),

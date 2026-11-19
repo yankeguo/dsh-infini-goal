@@ -10,9 +10,16 @@ name: publish
 #
 #   node scripts/promote-release.mjs --version <version>
 #
-# That human approval step also creates the GitHub Release. This workflow
-# therefore never publishes directly and never creates a GitHub Release: both
-# need proof-of-presence, which only a maintainer with 2FA can provide.
+# That human approval step also creates or updates the GitHub Release. This
+# workflow therefore never publishes directly and never creates a GitHub
+# Release: both need proof-of-presence, which only a maintainer with 2FA can
+# provide.
+#
+# The resolve step derives the dist-tag from the tag itself: stable versions
+# stage with `latest`, prereleases (v<version>-rc.N etc.) stage with `next`, so
+# pushing the tag is the whole trigger for either kind. A prerelease can never
+# move `latest`: scripts/stage-release.mjs refuses prerelease x latest, and the
+# approval step marks the GitHub Release `--prerelease --latest=false`.
 #
 # Keeping staging in CI and approval local is what makes a partial failure safe:
 # an interrupted staging run leaves private staged uploads (rejectable and
@@ -69,15 +76,17 @@ permissions:
   # it with the npm registry for a short-lived stage-publish token.
   id-token: write
 
+# One global publish group: two tags (e.g. an rc and its stable release) must
+# never stage concurrently, and a queued run must not be cancelled midway.
 concurrency:
-  group: publish-${{ github.event.inputs.release_tag || github.ref_name }}
+  group: publish
   cancel-in-progress: false
 
 jobs:
   stage:
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve the release tag
+      - name: Resolve the release tag and dist-tag
         id: release
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -94,8 +103,23 @@ jobs:
             v[0-9]*) ;;
             *) echo "release tag must look like v<version> (got '${tag}')" >&2; exit 1 ;;
           esac
-          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
-          printf '### Staged publish: `%s`\n\n' "${tag}" >> "${GITHUB_STEP_SUMMARY}"
+          version="${tag#v}"
+          # Stable versions stage with the latest dist-tag; prereleases
+          # (-rc.N etc.) stage with next so approving one can never replace the
+          # default install. Pushing the tag is the whole trigger.
+          case "${version}" in
+            *-*) dist_tag="next" ;;
+            *) dist_tag="latest" ;;
+          esac
+          {
+            echo "tag=${tag}"
+            echo "version=${version}"
+            echo "dist_tag=${dist_tag}"
+          } >> "${GITHUB_OUTPUT}"
+          {
+            printf '### Staged publish: `%s`\n\n' "${tag}"
+            printf 'Version `%s`, dist-tag `%s` (stable: latest; prerelease: next).\n' "${version}" "${dist_tag}"
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -119,12 +143,13 @@ jobs:
           package-manager-cache: false
 
       - name: Verify the tag matches every package version
-        # `--gate` checks the tag/version consistency and the dependency staging
-        # order before anything is installed; the staging step re-validates the
-        # build artifacts before the first upload.
+        # `--gate` checks the tag/version consistency, the derived dist-tag, and
+        # the dependency staging order before anything is installed; the staging
+        # step re-validates the build artifacts before the first upload.
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
-        run: node scripts/stage-release.mjs --release-tag "${RELEASE_TAG}" --gate
+          RELEASE_DIST_TAG: ${{ steps.release.outputs.dist_tag }}
+        run: node scripts/stage-release.mjs --release-tag "${RELEASE_TAG}" --tag "${RELEASE_DIST_TAG}" --gate
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -148,10 +173,11 @@ jobs:
         # approval step (scripts/promote-release.mjs) does, outside CI.
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_DIST_TAG: ${{ steps.release.outputs.dist_tag }}
           DRY_RUN: ${{ github.event.inputs.dry_run == 'true' }}
         run: |
           set -euo pipefail
-          args=(--release-tag "${RELEASE_TAG}" --provenance --no-git-checks)
+          args=(--release-tag "${RELEASE_TAG}" --tag "${RELEASE_DIST_TAG}" --provenance --no-git-checks)
           if [ "${DRY_RUN}" = "true" ]; then
             args+=(--dry-run)
           fi
