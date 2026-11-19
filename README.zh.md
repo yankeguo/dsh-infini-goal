@@ -17,7 +17,7 @@
 文档导航：[设计说明](docs/DESIGN.md) · [发布指南](docs/PUBLISHING.md) ·
 [DSH 兼容性](docs/COMPATIBILITY.md) ·
 [关闭系统自带的 dsh-goal](docs/DISABLE-BUILTIN-GOAL.md) ·
-[E2E 验证工具](tools/e2e/README.md) · [v0.1.0 release notes](docs/releases/v0.1.0.md)
+[E2E 验证工具](tools/e2e/README.md) · [v0.3.0-rc.1 release notes](docs/releases/v0.3.0-rc.1.md)
 
 ## 特性
 
@@ -140,7 +140,7 @@ DSH 的 profile HMR 会实时加载 Host 插件；浏览器侧刷新页面后出
 
 ```sh
 # 升级到指定版本（发布到 npm 后）
-dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle@0.2.3
+dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle@0.3.0-rc.1
 
 # 卸载（DSH 下次加载 profile 时会清理已移除 bundle 的选择）
 dsh plugin --profile desktop remove @yankeguo/dsh-infini-goal-bundle
@@ -404,8 +404,8 @@ dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle
 ```sh
 npm login                                                      # 维护者账号，2FA 已开启
 scripts/trusted-publishers.sh                                  # 一次性配置 stage-only trusted publisher
-node scripts/promote-release.mjs --version 0.2.3 --list-only   # 审查暂存结果
-node scripts/promote-release.mjs --version 0.2.3               # approve（2FA）+ GitHub Release
+node scripts/promote-release.mjs --version 0.3.0-rc.1 --list-only   # 审查暂存结果
+node scripts/promote-release.mjs --version 0.3.0-rc.1               # approve（2FA）+ GitHub Release
 ```
 
 这样中途失败不会造成半发布：未 approve 前没有任何版本公开，stage 失败可以 reject 后对同一个已存在

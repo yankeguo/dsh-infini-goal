@@ -20,7 +20,7 @@ and configurable quiet windows**.
 Docs: [Design](docs/DESIGN.md) · [Publishing guide](docs/PUBLISHING.md) ·
 [DSH compatibility](docs/COMPATIBILITY.md) ·
 [Disabling the built-in dsh-goal](docs/DISABLE-BUILTIN-GOAL.md) ·
-[E2E verification tools](tools/e2e/README.md) · [v0.1.0 release notes](docs/releases/v0.1.0.md)
+[E2E verification tools](tools/e2e/README.md) · [v0.3.0-rc.1 release notes](docs/releases/v0.3.0-rc.1.md)
 
 ## Features
 
@@ -152,7 +152,7 @@ Uninstall: `pnpm uninstall:profile`.
 
 ```sh
 # Upgrade to a specific version (after publishing to npm)
-dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle@0.2.3
+dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle@0.3.0-rc.1
 
 # Uninstall (DSH clears the selection of removed bundles the next time it loads the profile)
 dsh plugin --profile desktop remove @yankeguo/dsh-infini-goal-bundle
@@ -443,8 +443,8 @@ creates the GitHub Release:
 ```sh
 npm login                                                      # maintainer account with 2FA
 scripts/trusted-publishers.sh                                  # one-time stage-only trusted publishers
-node scripts/promote-release.mjs --version 0.2.3 --list-only   # review the staged uploads
-node scripts/promote-release.mjs --version 0.2.3               # approve (2FA) + GitHub Release
+node scripts/promote-release.mjs --version 0.3.0-rc.1 --list-only   # review the staged uploads
+node scripts/promote-release.mjs --version 0.3.0-rc.1               # approve (2FA) + GitHub Release
 ```
 
 This keeps a partial failure safe: nothing is public until every package is approved, and a failed
