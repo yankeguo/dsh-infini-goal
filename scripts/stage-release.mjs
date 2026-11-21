@@ -2,8 +2,8 @@
 /**
  * Stage every publishable workspace package to the npm registry in dependency
  * order, without publishing anything: staged uploads stay private until a
- * maintainer approves each one with a 2FA prompt (see
- * `scripts/promote-release.mjs`).
+ * maintainer batch-approves them on npmjs.com (Settings -> Staged Packages,
+ * one 2FA challenge per batch; see docs/PUBLISHING.md).
  *
  * This is the publish step of `.github/workflows/publish.yml`; a maintainer can
  * also dry-run it locally.
@@ -21,8 +21,9 @@
  *
  * Exit status: 0 when every package was staged (or the plan checked out under
  * `--check`/`--dry-run`), 1 on the first failure. A failed run leaves nothing
- * public; the staged entries must be rejected before the same versions can be
- * staged again (`node scripts/promote-release.mjs --version <version> --reject`).
+ * public; the staged entries must be rejected (`npm stage list --json`, then
+ * `npm stage reject <stage-id>`, or Reject in the npmjs.com Staged Packages
+ * page) before the same versions can be staged again.
  */
 import { spawnSync } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
@@ -61,8 +62,9 @@ function printUsage() {
     '  --gate                  validate versions/tag/order only (no build-artifact check)',
     '  -h, --help              show this help',
     '',
-    'Nothing is public after a successful run: every staged version still needs',
-    'a maintainer approval with 2FA (node scripts/promote-release.mjs).',
+    'Nothing is public after a successful run: the staged versions still need a',
+    'maintainer batch approval on npmjs.com (Settings -> Staged Packages, one',
+    '2FA challenge per batch) before they become installable.',
   ]
   console.log(lines.join('\n'))
 }
@@ -221,8 +223,9 @@ function reportFailure(plan, staged, remaining, reason) {
     '',
     'Nothing is public: staged uploads are private until every package is approved.',
     'Recovery:',
-    `  1. Discard the staged uploads of this version (2FA prompt per package):`,
-    `       node scripts/promote-release.mjs --version ${plan.version} --reject`,
+    `  1. Discard the staged uploads of this version first (2FA; per package):`,
+    `       npm stage list --json        # find each <stage-id> for ${plan.version}`,
+    `       npm stage reject <stage-id>  # or Reject them on npmjs.com Staged Packages`,
     '  2. Fix the cause (registry/trust/OIDC; for transient failures only) and re-run the',
     '     workflow for the SAME tag via workflow_dispatch with release_tag — never move the tag.',
     '  3. If the cause needs a code change, release the next patch version instead:',
@@ -240,7 +243,8 @@ function reportFailure(plan, staged, remaining, reason) {
     '',
     `Staged ${staged.length}/${staged.length + remaining.length} packages for ${plan.version}; nothing is public.`,
     '',
-    `Recovery: \`node scripts/promote-release.mjs --version ${plan.version} --reject\`, fix, then re-run the workflow for the same tag.`,
+    'Recovery: reject the staged uploads (`npm stage list --json` + `npm stage reject <stage-id>`,',
+    '2FA; or Reject on npmjs.com Staged Packages), fix, then re-run the workflow for the same tag.',
   ].join('\n'))
 }
 
@@ -317,18 +321,22 @@ function main() {
     `\n${verb} ${staged.length}/${plan.order.length} package(s) at ${plan.version} with dist-tag ${distTag}.`,
     ...staged.map(pkg => `  - ${pkg.name}@${plan.version} (${verb})`),
   ]
+  const releaseFlags = isPrerelease ? '--verify-tag --prerelease --latest=false' : '--verify-tag --latest'
   if (isPrerelease) {
-    summary.push('This is a prerelease: approve it as usual, and the GitHub Release is marked --prerelease --latest=false.')
+    summary.push('This is a prerelease: after web approval create the GitHub Release with --prerelease --latest=false.')
   }
   if (options.dryRun) {
     summary.push('', `dry run: nothing was uploaded; re-run with --no-git-checks (CI does) to stage for real.`)
   } else {
     summary.push(
       '',
-      'Nothing is public yet: staged versions are not installable until a maintainer approves them.',
-      'Next (maintainer machine, npm login with 2FA):',
-      `  node scripts/promote-release.mjs --version ${plan.version} --list-only    # inspect the staged uploads`,
-      `  node scripts/promote-release.mjs --version ${plan.version}               # approve + GitHub Release`,
+      'Nothing is public yet: staged versions are not installable until a maintainer approves them on npmjs.com.',
+      'Next:',
+      '  1. Review the staged uploads (npmjs.com -> Settings -> Staged Packages, or `npm stage list --json`).',
+      '  2. Batch-approve the eight versions on npmjs.com (one 2FA challenge for the batch).',
+      '  3. After approval, create the GitHub Release from the existing tag (maintainer or notified agent):',
+      `       gh release create v${plan.version} --repo yankeguo/dsh-infini-goal --title v${plan.version} \\`,
+      `         --notes-file docs/releases/v${plan.version}.md ${releaseFlags}`,
     )
   }
   console.log(summary.join('\n'))
@@ -338,7 +346,7 @@ function main() {
     `${staged.length}/${plan.order.length} packages ${verb} with dist-tag \`${distTag}\`.`,
     '',
     ...isPrerelease
-      ? ['Prerelease: the GitHub Release is marked `--prerelease --latest=false` and can never become Latest.', '']
+      ? ['Prerelease: create the GitHub Release with `--prerelease --latest=false`; it can never become Latest.', '']
       : [],
     '| # | package | version |',
     '| --- | --- | --- |',
@@ -346,8 +354,10 @@ function main() {
     '',
     options.dryRun
       ? 'Dry run: nothing was uploaded.'
-      : 'Nothing is public until a maintainer approves every staged version with 2FA: `node scripts/promote-release.mjs --version '
-        + `${plan.version}\` (and \`--list-only\` to inspect first).`,
+      : 'Nothing is public until a maintainer batch-approves the staged versions on npmjs.com'
+        + ' (Settings -> Staged Packages, one 2FA challenge). Then create the GitHub Release from the'
+        + ` existing tag: \`gh release create v${plan.version} --notes-file docs/releases/v${plan.version}.md`
+        + ` ${releaseFlags}\`.`,
   ].join('\n'))
 }
 

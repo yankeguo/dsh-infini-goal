@@ -436,22 +436,36 @@ tag triggers [`.github/workflows/publish.yml`](.github/workflows/publish.yml), w
 that the tag matches the `version` of all 8 publishable packages (including the root
 `package.json`), then installs, typechecks, tests, builds, and **stages** every package in dependency
 order. Staged versions are private and not installable; the workflow holds no npm token secret
-(`id-token: write` only) and never creates the GitHub Release. A maintainer then reviews the staged
-versions and approves them with a 2FA prompt from their own machine, which publishes them and
-creates the GitHub Release:
+(`id-token: write` only) and never creates the GitHub Release.
+
+After CI stages the release, the maintainer approves the staged versions on
+[npmjs.com](https://www.npmjs.com) — **Settings → Staged Packages**, add the eight versions to a
+batch, and confirm with a single 2FA challenge (one version per package; wait for automated
+validation first). Nothing is public before that, and approval cannot be undone once it publishes.
+Approval is the only publish step; the GitHub Release is then created manually from the existing
+tag, by the maintainer or by the agent the maintainer notifies:
 
 ```sh
-npm login                                                      # maintainer account with 2FA
-scripts/trusted-publishers.sh                                  # one-time stage-only trusted publishers
-node scripts/promote-release.mjs --version 0.3.0 --list-only   # review the staged uploads
-node scripts/promote-release.mjs --version 0.3.0               # approve (2FA) + GitHub Release
+scripts/trusted-publishers.sh                                  # one-time: stage-only trusted publishers
+
+# 1. after CI stages: approve the eight versions on npmjs.com (Settings -> Staged Packages)
+# 2. after approval: create the GitHub Release from the existing tag (never moves/creates a tag)
+gh release create v0.3.0 --repo yankeguo/dsh-infini-goal --title v0.3.0 \
+  --notes-file docs/releases/v0.3.0.md --verify-tag --latest
+#    prerelease: ... --prerelease --latest=false
 ```
 
+`--verify-tag` makes `gh` fail instead of creating a tag, so a Release can only point at a tag that
+CI actually staged. Afterwards check that the npm dist-tags, the git tag, and the GitHub Release name
+the same version.
+
 This keeps a partial failure safe: nothing is public until every package is approved, and a failed
-staging run can be rejected and re-run for the same existing tag. The trusted publisher grants only
-`--allow-stage-publish`, so CI can never publish directly. The full process (trusted-publisher
-migration, re-staging an existing tag via `workflow_dispatch` + `release_tag`, approval, failure
-recovery, security model) is in [`docs/PUBLISHING.md`](docs/PUBLISHING.md).
+staging run can be rejected (web batch reject or `npm stage reject <stage-id>`) and re-run for the
+same existing tag. The trusted publisher grants only `--allow-stage-publish`, so CI can never
+publish directly. The full process (trusted-publisher migration, staged review, web batch approval,
+manual GitHub Release, failure recovery, security model) is in
+[`docs/PUBLISHING.md`](docs/PUBLISHING.md). The old `scripts/promote-release.mjs` has been removed;
+mentions in older release notes are historical.
 
 ## Built-in dsh-goal is off by default
 

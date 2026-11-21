@@ -5,25 +5,26 @@ name: publish
 # A `v*` tag push — or a manual dispatch naming an existing tag — verifies the
 # tag, installs, typechecks, tests, builds, and then STAGES every workspace
 # package to npm. Staging is private: nothing becomes installable until a
-# maintainer approves every staged version with a 2FA prompt from their own
-# machine:
+# maintainer batch-approves the staged versions on npmjs.com (Settings ->
+# Staged Packages, one 2FA challenge for the whole batch).
 #
-#   node scripts/promote-release.mjs --version <version>
-#
-# That human approval step also creates or updates the GitHub Release. This
-# workflow therefore never publishes directly and never creates a GitHub
-# Release: both need proof-of-presence, which only a maintainer with 2FA can
-# provide.
+# That human approval is the only publish step. Once every package is public,
+# the maintainer — or the agent the maintainer notifies — creates the GitHub
+# Release manually from the existing tag with
+# `gh release create ... --notes-file ... --verify-tag`, so this workflow never
+# publishes directly and never creates a GitHub Release.
 #
 # The resolve step derives the dist-tag from the tag itself: stable versions
 # stage with `latest`, prereleases (v<version>-rc.N etc.) stage with `next`, so
 # pushing the tag is the whole trigger for either kind. A prerelease can never
-# move `latest`: scripts/stage-release.mjs refuses prerelease x latest, and the
-# approval step marks the GitHub Release `--prerelease --latest=false`.
+# move `latest`: scripts/stage-release.mjs refuses prerelease x latest, the
+# staged review checks the dist-tag CI recorded, and the manual GitHub Release
+# uses `--prerelease --latest=false`.
 #
-# Keeping staging in CI and approval local is what makes a partial failure safe:
-# an interrupted staging run leaves private staged uploads (rejectable and
-# re-stageable) instead of a half-published version that consumers can install.
+# Keeping staging in CI and approval in npmjs.com is what makes a partial
+# failure safe: an interrupted staging run leaves private staged uploads
+# (rejectable and re-stageable) instead of a half-published version that
+# consumers can install.
 #
 # There is NO npm token secret. GitHub Actions mints a short-lived OIDC token
 # (`id-token: write`); pnpm exchanges it with the npm registry for a short-lived
@@ -170,7 +171,9 @@ jobs:
         # No NODE_AUTH_TOKEN and no NPM_TOKEN: pnpm detects the GitHub Actions
         # OIDC environment, exchanges its ID token for a registry token, and
         # uploads private staged versions. Staging never prompts for 2FA; the
-        # approval step (scripts/promote-release.mjs) does, outside CI.
+        # approval happens on npmjs.com (Settings -> Staged Packages, batch
+        # approve) outside CI. Summary text is written by stage-release.mjs and
+        # points at the web approval plus the manual `gh release create`.
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           RELEASE_DIST_TAG: ${{ steps.release.outputs.dist_tag }}

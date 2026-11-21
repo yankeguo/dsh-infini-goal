@@ -44,13 +44,17 @@ this file — it records only the invariants that are easy to break by accident.
 
 ## Releases are staged, then verified three ways
 
-- CI only stages packages; a maintainer approves them locally with 2FA. Never
-  hand a CI job the ability to publish directly.
-- After approve, the version must agree in three places for all eight packages:
-  `package.json` / tag, `npm view <pkg>@<version> version dist-tags`, and the
-  GitHub Release. A missing release is recreated from the existing tag with
-  `--verify-tag`; tags are never moved or rebuilt. The commands are in
-  [docs/PUBLISHING.md](docs/PUBLISHING.md) §9.
+- CI only stages packages; a maintainer batch-approves the staged versions on
+  npmjs.com (Settings -> Staged Packages, one 2FA challenge per batch; the CLI
+  `npm stage approve <stage-id>` is the fallback). Never hand a CI job the
+  ability to publish directly.
+- Approval is the only publish step. Afterwards the version must agree in three
+  places for all eight packages: `package.json` / tag,
+  `npm view <pkg>@<version> version dist-tags`, and the GitHub Release. The
+  release is created manually from the existing tag with
+  `gh release create ... --verify-tag` (maintainer, or the agent the maintainer
+  notifies); tags are never moved or rebuilt. The commands are in
+  [docs/PUBLISHING.md](docs/PUBLISHING.md) §9-§10.
 
 ## Provenance
 

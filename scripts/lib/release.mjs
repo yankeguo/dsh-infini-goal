@@ -13,9 +13,7 @@
  * alphabetical directory order, which makes the printed plan reproducible.
  *
  * Used by:
- *   - scripts/stage-release.mjs (the CI staging run and local dry runs),
- *   - scripts/promote-release.mjs (approval/reject needs the same package list
- *     and the same order).
+ *   - scripts/stage-release.mjs (the CI staging run and local dry runs).
  *
  * Nothing here uploads or mutates the registry: every helper is read-only.
  */

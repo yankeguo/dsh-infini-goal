@@ -3,10 +3,12 @@
 # workspace, for STAGED publishing only.
 #
 # The CI workflow stages packages with a short-lived OIDC token; it can never
-# publish directly. A human maintainer then approves the staged versions with a
-# 2FA prompt (see scripts/promote-release.mjs). `--allow-stage-publish` grants
-# only `npm stage publish`; `--allow-publish` is deliberately NOT granted, so a
-# compromised workflow cannot put a version on npm without human approval.
+# publish directly. A human maintainer then batch-approves the staged versions
+# on npmjs.com (Settings -> Staged Packages, one 2FA challenge per batch; the
+# CLI fallback is `npm stage approve <stage-id>`). `--allow-stage-publish`
+# grants only `npm stage publish`; `--allow-publish` is deliberately NOT
+# granted, so a compromised workflow cannot put a version on npm without human
+# approval.
 #
 # Run this once per package after the package's FIRST publish (npm requires the
 # package to exist before a trusted publisher can be attached). The first
@@ -315,6 +317,9 @@ if [[ "${#failed[@]}" -gt 0 ]]; then
 fi
 
 echo "All ${#PACKAGES[@]} packages configured for STAGED publishing only."
-echo "CI stages a v* tag; approve the staged versions with:"
-echo "  node scripts/promote-release.mjs --version <version>"
+echo "CI stages a v* tag; batch-approve the staged versions on npmjs.com:"
+echo "  Settings -> Staged Packages -> Add to batch -> Approve (one 2FA challenge)"
+echo "Then create the GitHub Release from the existing tag (never moves/creates a tag):"
+echo "  gh release create v<version> --repo yankeguo/dsh-infini-goal --title v<version> --notes-file docs/releases/v<version>.md --verify-tag --latest"
+echo "  (prerelease: --prerelease --latest=false instead of --latest)"
 echo "Verify the trust configuration with: scripts/trusted-publishers.sh --list"

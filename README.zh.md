@@ -398,20 +398,33 @@ dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle
 [`.github/workflows/publish.yml`](.github/workflows/publish.yml)，先校验 tag 与全部 8 个可发布包
 （含根 `package.json`）的 `version` 完全一致，再 install / typecheck / test / build，并按依赖拓扑
 **逐个 stage** 所有包。暂存版本是私有的、不可安装；工作流没有任何 npm token secret（仅
-`id-token: write`），也**不创建** GitHub Release。随后由维护者在本机审查并用 2FA 逐包 approve，
-版本才公开，并由审批脚本创建 GitHub Release：
+`id-token: write`），也**不创建** GitHub Release。
+
+CI stage 完成后，维护者在 [npmjs.com](https://www.npmjs.com) 网页上批量 approve：打开
+**Settings → Staged Packages**，把 8 个同版本暂存项加入同一个 batch，一次 2FA 确认（同一个包
+只能选一个版本；需等自动校验结束）。approve 之前没有任何版本公开；**approve 即公开且不可撤销**。
+approve 是唯一的发布动作，随后由维护者（或维护者通知的 agent）用既有 tag **手动创建** GitHub
+Release，绝不移动/新建 tag：
 
 ```sh
-npm login                                                      # 维护者账号，2FA 已开启
 scripts/trusted-publishers.sh                                  # 一次性配置 stage-only trusted publisher
-node scripts/promote-release.mjs --version 0.3.0 --list-only   # 审查暂存结果
-node scripts/promote-release.mjs --version 0.3.0               # approve（2FA）+ GitHub Release
+
+# 1. CI stage 后：npmjs.com → Settings → Staged Packages 批量 approve
+# 2. approve 后：用既有 tag 手动创建 GitHub Release（不移动/新建 tag）
+gh release create v0.3.0 --repo yankeguo/dsh-infini-goal --title v0.3.0 \
+  --notes-file docs/releases/v0.3.0.md --verify-tag --latest
+#    预发布版：... --prerelease --latest=false
 ```
 
-这样中途失败不会造成半发布：未 approve 前没有任何版本公开，stage 失败可以 reject 后对同一个已存在
-的 tag 重跑。trusted publisher 只授予 `--allow-stage-publish`，CI 无法直接公开发布。完整流程
-（trusted publisher 迁移、用 `workflow_dispatch` + `release_tag` 重跑已存在的 tag、审批、失败恢复、
-安全模型）见 [`docs/PUBLISHING.md`](docs/PUBLISHING.md)。
+`--verify-tag` 让 `gh` 在 tag 不存在时直接失败（而不是新建 tag），保证 Release 只指向 CI 实际
+stage 的 tag。创建后核对 npm dist-tags、git tag、GitHub Release 三者指向同一版本。
+
+这样中途失败不会造成半发布：未 approve 前没有任何版本公开，stage 失败可以 reject（网页批量
+Reject 或 `npm stage reject <stage-id>`）后对同一个已存在的 tag 重跑。trusted publisher 只授予
+`--allow-stage-publish`，CI 无法直接公开发布。完整流程（trusted publisher 迁移、暂存审查、网页
+批量审批、手动 GitHub Release、失败恢复、安全模型）见
+[`docs/PUBLISHING.md`](docs/PUBLISHING.md)。旧的 `scripts/promote-release.mjs` 已删除，历史
+release notes 中的相关命令仅为历史记录。
 
 ## 系统自带的 dsh-goal 默认关闭
 
