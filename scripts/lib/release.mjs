@@ -202,6 +202,36 @@ export function loadReleasePlan({ rootDir, version, releaseTag, checkVersions = 
 }
 
 /**
+ * Reject a leading YAML frontmatter block in a package README.
+ *
+ * npm renders the package README on npmjs.com and does not understand the
+ * `---` metadata block that DSH-internal documentation pipelines use; it shows
+ * the block as literal text at the top of the package page. The convention
+ * applies to DSH's internal docs, not to third-party packages distributed
+ * through npm, so published README files must stay plain Markdown.
+ * @param {{ name: string, path: string }} pkg publishable package
+ * @returns {void}
+ * @throws when a package README starts with a `---` frontmatter line
+ */
+function assertReadmeHasNoFrontmatter(pkg) {
+  let text
+  try {
+    text = readFileSync(join(pkg.path, 'README.md'), 'utf8')
+  } catch (error) {
+    // Only a package without a README is fine; other read failures are real problems.
+    if (error?.code === 'ENOENT') return
+    throw error
+  }
+  const firstLine = text.replace(/^\uFEFF/, '').split('\n', 1)[0].trimEnd()
+  if (firstLine === '---') {
+    throw new Error(
+      `${pkg.name}: README.md starts with a YAML frontmatter block;`
+      + ' npmjs.com renders it as literal text, so the published README must be plain Markdown',
+    )
+  }
+}
+
+/**
  * Verify that every literal `files` entry of every package exists on disk.
  *
  * The CI staging run happens after `pnpm build`; running this guard before the
@@ -209,7 +239,7 @@ export function loadReleasePlan({ rootDir, version, releaseTag, checkVersions = 
  * preflight failure instead of a staged tarball with missing files.
  * @param {{ packages: Array<{ name: string, dir: string, path: string, manifest: any }> }} plan release plan
  * @returns {void}
- * @throws when a package has no `files` list or a literal entry is missing
+ * @throws when a package has no `files` list, a literal entry is missing, or a published README has frontmatter
  */
 export function assertPackageContents(plan) {
   const problems = []
@@ -232,6 +262,7 @@ export function assertPackageContents(plan) {
         problems.push(`${pkg.name}: "files" entry "${entry}" is missing from packages/${pkg.dir}/ (run pnpm build first)`)
       }
     }
+    assertReadmeHasNoFrontmatter(pkg)
   }
   if (problems.length > 0) {
     throw new Error(`staged release contents are incomplete:\n${problems.map(problem => `  - ${problem}`).join('\n')}`)

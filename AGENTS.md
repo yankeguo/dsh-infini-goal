@@ -5,8 +5,10 @@ user-facing behavior is [README.md](README.md) / [README.zh.md](README.zh.md);
 architecture, persistence, and authority semantics are in
 [docs/DESIGN.md](docs/DESIGN.md); the verified DSH range and per-release evidence
 in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md); the release runbook in
-[docs/PUBLISHING.md](docs/PUBLISHING.md). Keep those in sync instead of growing
-this file — it records only the invariants that are easy to break by accident.
+[docs/PUBLISHING.md](docs/PUBLISHING.md); the development workflow (build, test,
+E2E, documentation conventions) in [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
+Keep those in sync instead of growing this file — it records only the invariants
+that are easy to break by accident.
 
 ## Authorization fails closed
 

@@ -1,5 +1,11 @@
 # Isolated E2E harness for the DeepSeek Harness plugin suite
 
+> Development documentation. This directory is not published to npm; user-facing
+> documentation is in the repository
+> [README.md](https://github.com/yankeguo/dsh-infini-goal/blob/main/README.md), and the
+> development workflow is summarized in
+> [docs/CONTRIBUTING.md](https://github.com/yankeguo/dsh-infini-goal/blob/main/docs/CONTRIBUTING.md).
+
 Reproducible, isolated end-to-end verification of this repo's DSH plugin suite
 against the **installed** DeepSeek Harness desktop runtime or an isolated
 npm-installed release — verified on **0.2.2-rc.1**, **0.2.2-rc.2**,
@@ -626,9 +632,9 @@ interval is pending, `下一轮 mm:ss` for the live countdown, and
 
 Screenshots (committed under `tools/e2e/artifacts/`):
 
-- [`artifacts/ui-bar-active.jpg`](artifacts/ui-bar-active.jpg) — active bar:
+- [`artifacts/ui-bar-active.jpg`](https://raw.githubusercontent.com/yankeguo/dsh-infini-goal/main/tools/e2e/artifacts/ui-bar-active.jpg) — active bar:
   自动推进中 · objective · 轮次 1 · 最小间隔 1m.
-- [`artifacts/ui-bar-paused.jpg`](artifacts/ui-bar-paused.jpg) — paused bar:
+- [`artifacts/ui-bar-paused.jpg`](https://raw.githubusercontent.com/yankeguo/dsh-infini-goal/main/tools/e2e/artifacts/ui-bar-paused.jpg) — paused bar:
   已暂停 · objective · 轮次 2, with resume/clear actions.
 
 The same tab also proves the client plugin executed: the suite client row is in

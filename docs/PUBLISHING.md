@@ -260,7 +260,8 @@ tar -xzOf $MAIN package/package.json   # workspace:* 应已改写为精确版本
 每个包都有 `locale/en.json` + `locale/zh.json`，`meta.title`/`meta.description` 非空，
 `package.json` 的 `files` 含 `locale/*.json`、`exports` 含 `"./locale/*.json"`，
 且 `package.json` 的 `description` 与英文 locale 一致。**新增包必须一并补齐这些字段**，
-否则测试与打包抽查都会失败；维护方式见 [README 的「插件展示元数据」](../README.zh.md#插件展示元数据)。
+否则测试与打包抽查都会失败；维护方式见
+[CONTRIBUTING 的「Plugin display metadata」](CONTRIBUTING.md#plugin-display-metadata)。
 
 ### 5. 提交并推 tag → CI stage（稳定版与 rc 同一条路径）
 
@@ -634,7 +635,7 @@ dsh plugin --profile desktop add @yankeguo/dsh-infini-goal-bundle@0.3.0-rc.1
 # 或在 Web：Plugins → Add plugin → 输入包名（rc 输入 @yankeguo/dsh-infini-goal-bundle@0.3.0-rc.1）
 ```
 
-本地 checkout 开发仍可用 `pnpm install:profile`（见主 [README](../README.md)）。
+本地 checkout 开发仍可用 `pnpm install:profile`（见 [开发与贡献](CONTRIBUTING.md)）。
 
 ## 参考
 
